@@ -11,3 +11,10 @@ layout: default
 Although the focus and pre-requisites of the course will not change, week-by-week topics and activities will likely go though several rounds of changes, to accommodate student backgrounds and requests.
 
 <p>This is a brand-new course, in a rapidly changing technical field. We'll be experimenting and adjusting course materials as we go.
+
+----
+
+Day 1 slides: <https://sergeybratus.github.io/RE-basics-W22/day1-slides.pdf>
+
+Day 1 readings and notes: <https://sergeybratus.github.io/RE-basics-W22/readings>
+
