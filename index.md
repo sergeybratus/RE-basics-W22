@@ -18,3 +18,5 @@ Day 1 slides: <https://sergeybratus.github.io/RE-basics-W22/day1-slides.pdf>
 
 Day 1 readings and notes: <https://sergeybratus.github.io/RE-basics-W22/readings>
 
+Day 1 examples and homework: <https://sergeybratus.github.io/RE-basics-W22/day1-src/>
+
