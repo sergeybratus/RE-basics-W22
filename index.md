@@ -12,7 +12,7 @@ Although the focus and pre-requisites of the course will not change, week-by-wee
 
 <p>This is a brand-new course, in a rapidly changing technical field. We'll be experimenting and adjusting course materials as we go.
 
-----
+<hr>
 
 <p><a href="https://sergeybratus.github.io/RE-basics-W22/day1-slides.pdf">Day 1 slides</a>
 
