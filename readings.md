@@ -3,7 +3,7 @@ title: Resources and links
 layout: default
 ---
 
-ABI (Application Binary Interface) is the reverse engineer's best friend and open secret.
+ABI (Application Binary Interface) is the reverse engineer's best friend and best-kept open secret.
 
 Understanding the ABI means understanding how the compilation pipeline works and
 how information about the program's variables and functions (more generally, "symbols")
@@ -35,18 +35,19 @@ and AT&T assembly syntax. Pages 32--41 explain the ABI.
 
 ==================[ Item 2: AMD64/x86_64 ABI ]========================
 
-Get it: https://www.uclibc.org/docs/psABI-x86_64.pdf
+Get it: <https://www.uclibc.org/docs/psABI-x86_64.pdf>
 
 Read sections 3.1 and 3.2; then sections 4 and 5.
 
 On page 20 of the AMD64 ABI document, find how integer and pointer
 arguments are passed to functions:
 
-  If the class is INTEGER, the next available register of the sequence %rdi,
-  %rsi, %rdx, %rcx, %r8 and %r9 is used.
+>  If the class is INTEGER, the next available register of the sequence %rdi,
+>  %rsi, %rdx, %rcx, %r8 and %r9 is used.
 
 Note that this is very different from the 32-bit Linux calling convention,
-where arguments are pushed onto the stack and referenced off of %esp.
+where arguments are pushed onto the stack by the caller function, rather
+than being passed in registers. See Item 3.
 
 Look at Figure 3.3 on page 16 to see the layout of an amd64 stack frame.
 
@@ -54,14 +55,14 @@ Look at Figure 3.1 on page 12, which shows how different C types are represented
 This table is very important; not understanding these representations leads
 to nasty surprises like integer overflows.
 
-----
+==================[ Item 3: Intel 32-bit ABI ]========================
 
 You may also find the "Tiny guide to the 32-bit x86 assembly language"
 by Adam Ferrari and others useful (a local copy is at
 <https://www.cs.dartmouth.edu/~sergey/cs108/tiny-guide-to-x86-assembly.pdf>).
 It is dated (32 bit code is aging fast), but lucid.
 
-----
+==================[ Links and quick summaries ]========================
 
 <http://www.ouah.org/RevEng/x24.htm> -- A brief summary of the Linux compilation process, with GCC (and LLVM) options that matter.
 
