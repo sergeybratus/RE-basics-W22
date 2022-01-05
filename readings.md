@@ -3,6 +3,9 @@ title: Resources and links
 layout: default
 ---
 
+Resources and links
+===================
+
 ABI (Application Binary Interface) is the reverse engineer's best friend and best-kept open secret.
 
 Understanding the ABI means understanding how the compilation pipeline works and
@@ -37,7 +40,7 @@ and AT&T assembly syntax. Pages 32--41 explain the ABI.
 
 Get it: <https://www.uclibc.org/docs/psABI-x86_64.pdf>
 
-Read sections 3.1 and 3.2; then sections 4 and 5.
+Read sections 3.1 and 3.2. (In our next class, we'll be addressing sections 4 and 5.)
 
 On page 20 of the AMD64 ABI document, find how integer and pointer
 arguments are passed to functions:
