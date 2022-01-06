@@ -1,0 +1,1 @@
+http://stackoverflow.com/questions/3305164/how-to-modify-memory-contents-using-gdb

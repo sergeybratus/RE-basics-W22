@@ -1,0 +1,665 @@
+
+========================[ C compilation environment ]========================
+
+C and C++ files are separate _compilation units_: they are processed
+by the compiler and the assembler separately. It's only the linker (ld
+in the GCC build chain) that links the compiled object files together
+and assigns them address ranges in the same virtual address space. The
+actual address space of a process created from the linked executable
+will be similar to what the linker creates (but may not be exactly the
+same, so that not all process images are laid out the same; this
+defensive technique is known as address space load randomization,
+ASLR).
+
+Still, when calls to standard Unix library functions like puts,
+printf, open, etc.  occur in a compilation unit, they must be compiled
+somehow, even though the code of these functions is not there. Moreover,
+if the executable is dynamically linked, i.e., the compiled code for
+standard library functions will not be loaded until runtime, and 
+so their addresses in the virtual address space cannot be known even
+to the linker. 
+
+A _call_ instruction must use a particular address, though (more
+precisely, a particular offset from the current instruction address or
+RIP value). The compiler can leave the bytes of this displacement
+"blank" (fill them with 0s), and expect the linker to resolve them.
+Like so:
+
+$ cat missing-func.c
+#include <stdio.h>
+
+int g(int, int);
+
+int main()
+{
+     puts("hello");
+     return g(1,2);
+}
+
+// This stops at creating the object file, for the linker to consume.
+
+$ gcc -c missing-func.c
+
+$ gobjdump -d missing-func.o 
+
+missing-func.o:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <_main>:
+   0:            55                     push   %rbp
+   1:            48 89 e5               mov    %rsp,%rbp
+   4:            48 83 ec 10            sub    $0x10,%rsp
+   8:            48 8d 3d 00 00 00 00   lea    0x0(%rip),%rdi        # f <_main+0xf>
+   f:            c7 45 fc 00 00 00 00   movl   $0x0,-0x4(%rbp)
+  16:            e8 00 00 00 00         callq  1b <_main+0x1b>  // <--- displacement to puts is not filled, 00 00 00 00
+  1b:            bf 01 00 00 00         mov    $0x1,%edi
+  20:            be 02 00 00 00         mov    $0x2,%esi
+  25:            89 45 f8               mov    %eax,-0x8(%rbp)
+  28:            e8 00 00 00 00         callq  2d <_main+0x2d>  // <--- displacement to g is not filled, 00 00 00 00
+  2d:            48 83 c4 10            add    $0x10,%rsp
+  31:            5d                     pop    %rbp
+  32:            c3                     retq 
+
+But what can the linker do?
+
+Linkers create "stubs" for these missing functions, and then edit call
+instructions as if the function called started at the stub. The stub
+typically contains just an indirect jump. At first, the jump leads to
+the entry point to the runtime dynamic linker-loader (RTLD): ld.so on
+Linux, dyld on MacOS. This code is loaded among the first into a
+process, and all stubs point to it initially (more precisely, they
+point to the stub to the entry into RTLD). Then the RTLD runs, finds
+and loads the appropriate library based on the desired function's name
+(remember all these strings in the executable!), and finally replaces
+the target of the indirect jump with the address of the loaded standard
+function itself. The next call to the stub will go straight through to
+the function.
+
+// Consider how puts gets linked in our hello:
+
+$ cat hello.c
+#include <stdio.h>
+
+int main()
+{
+     int i = 10;
+     
+     while( i >= 0 ){
+          puts( "Hello" );
+          i = i - 1;
+     }
+
+     return 42;
+}
+
+$ gobjdump -d hello
+
+hello:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f20 <_main>:
+   100000f20:    55                     push   %rbp
+   100000f21:    48 89 e5               mov    %rsp,%rbp
+   100000f24:    48 83 ec 10            sub    $0x10,%rsp
+   100000f28:    c7 45 fc 00 00 00 00   movl   $0x0,-0x4(%rbp)
+   100000f2f:    c7 45 f8 0a 00 00 00   movl   $0xa,-0x8(%rbp)        // <-- that's local variable "i"
+   100000f36:    81 7d f8 00 00 00 00   cmpl   $0x0,-0x8(%rbp)
+   100000f3d:    0f 8c 20 00 00 00      jl     100000f63 <_main+0x43>
+   100000f43:    48 8d 3d 44 00 00 00   lea    0x44(%rip),%rdi        # 100000f8e <_main+0x6e> // <-- "Hello" string
+   100000f4a:    e8 1f 00 00 00         callq  100000f6e <_main+0x4e>  // <-- displacement to the stub is 0x1f; 100000f4f+1f=100000f6e
+   100000f4f:    8b 4d f8               mov    -0x8(%rbp),%ecx
+   100000f52:    81 e9 01 00 00 00      sub    $0x1,%ecx
+   100000f58:    89 4d f8               mov    %ecx,-0x8(%rbp)
+   100000f5b:    89 45 f4               mov    %eax,-0xc(%rbp)
+   100000f5e:    e9 d3 ff ff ff         jmpq   100000f36 <_main+0x16>
+   100000f63:    b8 2a 00 00 00         mov    $0x2a,%eax    // <-- note new return value, 42
+   100000f68:    48 83 c4 10            add    $0x10,%rsp
+   100000f6c:    5d                     pop    %rbp
+   100000f6d:    c3                     retq   
+
+Disassembly of section __TEXT.__stubs:
+
+// This is the stub to puts, added by linker:
+
+0000000100000f6e <__TEXT.__stubs>:
+   100000f6e:    ff 25 9c 00 00 00      jmpq   *0x9c(%rip)        # 100001010 <_main+0xf0>
+
+Disassembly of section __TEXT.__stub_helper:
+
+// The stub to dyld is around here:
+
+0000000100000f74 <__TEXT.__stub_helper>:
+   100000f74:    4c 8d 1d 8d 00 00 00   lea    0x8d(%rip),%r11        # 100001008 <_main+0xe8>
+   100000f7b:    41 53                  push   %r11
+   100000f7d:    ff 25 7d 00 00 00      jmpq   *0x7d(%rip)        # 100001000 <_main+0xe0>
+   100000f83:    90                     nop
+   100000f84:    68 00 00 00 00         pushq  $0x0
+   100000f89:    e9 e6 ff ff ff         jmpq   100000f74 <_main+0x54>
+
+// Let's see this in action. LLDB's disassembler is slightly different in style,
+//   and it also can look things up for us in memory, since, unlike objdump that
+//   can only look statically at the executable, LLDB knows the exact memory 
+//   layout of the process. 
+
+// I have to peek into http://lldb.llvm.org/lldb-gdb.html often; it will help you too.
+
+$ lldb hello
+(lldb) target create "hello"
+2016-09-15 20:21:06.834 lldb[5568:6776830] Metadata.framework [Error]: couldn't get the client port
+Current executable set to 'hello' (x86_64).
+(lldb) disas -n main
+hello`main:
+hello[0x100000f20] <+0>:  pushq  %rbp
+hello[0x100000f21] <+1>:  movq   %rsp, %rbp
+hello[0x100000f24] <+4>:  subq   $0x10, %rsp
+hello[0x100000f28] <+8>:  movl   $0x0, -0x4(%rbp)
+hello[0x100000f2f] <+15>: movl   $0xa, -0x8(%rbp)
+hello[0x100000f36] <+22>: cmpl   $0x0, -0x8(%rbp)
+hello[0x100000f3d] <+29>: jl     0x100000f63               ; <+67>
+hello[0x100000f43] <+35>: leaq   0x44(%rip), %rdi          ; "Hello"   // <-- that's what's at 0x44(%rip)
+hello[0x100000f4a] <+42>: callq  0x100000f6e               ; symbol stub for: puts  
+hello[0x100000f4f] <+47>: movl   -0x8(%rbp), %ecx
+hello[0x100000f52] <+50>: subl   $0x1, %ecx
+hello[0x100000f58] <+56>: movl   %ecx, -0x8(%rbp)
+hello[0x100000f5b] <+59>: movl   %eax, -0xc(%rbp)
+hello[0x100000f5e] <+62>: jmp    0x100000f36               ; <+22>
+hello[0x100000f63] <+67>: movl   $0x2a, %eax
+hello[0x100000f68] <+72>: addq   $0x10, %rsp
+hello[0x100000f6c] <+76>: popq   %rbp
+hello[0x100000f6d] <+77>: retq   
+
+// As an aside, let's see that "Hello" is indeed where the disassembler found it:
+
+mem read -s1 -fc 0x100000f4a+0x44
+0x100000f8e: Hello\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0
+0x100000fae: \0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0
+warning: Not all bytes (6/64) were able to be read from 0x100000f8e.
+
+// If we wanted to change "H" to "J", LLDB can help:
+
+(lldb) mem write -s1 -fc 0x100000f8e 'J'
+error: invalid process
+
+// Oops, we haven't started the process yet, so the virtual memory space isn't yet there to write!
+//   Let's start it, but breakpoint it at main so that we can mess with memory.
+
+(lldb) b main
+Breakpoint 1: where = hello`main, address = 0x0000000100000f20
+(lldb) r
+Process 5604 launched: '/Users/user/cs59/x86/hello' (x86_64)
+Process 5604 stopped
+* thread #1: tid = 0x676f95, 0x0000000100000f20 hello`main, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x0000000100000f20 hello`main
+hello`main:
+->  0x100000f20 <+0>: pushq  %rbp
+    0x100000f21 <+1>: movq   %rsp, %rbp
+    0x100000f24 <+4>: subq   $0x10, %rsp
+    0x100000f28 <+8>: movl   $0x0, -0x4(%rbp)
+(lldb) mem write -s1 -fc 0x100000f8e 'J'
+(lldb) c
+Process 5604 resuming
+Jello
+Jello
+Jello
+Jello
+Jello
+Jello
+Jello
+Jello
+Jello
+Jello
+Jello
+Process 5604 exited with status = 42 (0x0000002a) 
+
+//  OK, end distraction. Wait, squirrel! :)
+//  OK, now really end distraction. Let's see where call to puts actually goes:
+
+(lldb) disas -s 0x100000f6e
+hello`puts:
+0x100000f6e <+0>: jmpq   *0x9c(%rip)               ; (void *)0x0000000100000f84   //<-- LLDB already looked up what's at 0x9c(%rip).
+
+// Let's double-check what's at 0x9c(%rip). RIP would be pointing to the _next_ instruction, past however many bytes this one is.
+//   Let's look it up.
+
+(lldb) disas -b -s 0x100000f6e 
+hello`puts:
+0x100000f6e <+0>: ff 25 9c 00 00 00  jmpq   *0x9c(%rip)               ; (void *)0x0000000100000f84
+
+// So 0x100000f6e + 6 is 0x100000f6e is 0x0000000100000f74, and we need to add 0x9c to that:
+
+(lldb) expr/x 0x100000f6e + 0x6 + 0x9c    //<-- I forgot /x first, and got a decimal, useless as address
+(long) $3 = 0x0000000100001010
+
+(lldb) mem read -s8 -fx 0x0000000100001010
+0x100001010: 0x0000000100000f84 0x0000000000000000   //<-- Indeed, we find 0x0000000100000f84, what LLDB already looked up for us.
+0x100001020: 0x0000000000000000 0x0000000000000000
+0x100001030: 0x0000000000000000 0x0000000000000000
+0x100001040: 0x0000000000000000 0x0000000000000000
+warning: Not all bytes (8/64) were able to be read from 0x100001010.
+
+// We can look at that memory differently. This is what an address looks in little-endian, byte-by-byte
+
+(lldb) mem read -s1 -fx 0x0000000100001010
+0x100001010: 0x84 0x0f 0x00 0x00 0x01 0x00 0x00 0x00
+
+// The default read width appears to be 4; another little-endian artifact
+
+(lldb) mem read  -fx 0x0000000100001010
+0x100001010: 0x00000f84 0x00000001 0x00000000 0x00000000
+0x100001020: 0x00000000 0x00000000 0x00000000 0x00000000
+warning: Not all bytes (8/32) were able to be read from 0x100001010.
+
+// OK, so what's at that 0x0000000100000f84? 
+
+(lldb) disas -s 0x0000000100000f84
+0x100000f84: pushq  $0x0           // <-- This is the index of "puts" in the symbol table. It will be used by dyld.
+0x100000f89: jmp    0x100000f74    // <-- OK, another jump (but close by; all stubs are neighbors here)
+
+(lldb) disas -s 0x100000f74
+0x100000f74: leaq   0x8d(%rip), %r11          ; (void *)0x0000000000000000  //<--Unfilled yet.
+0x100000f7b: pushq  %r11
+0x100000f7d: jmpq   *0x7d(%rip)               ; (void *)0x0000000000000000  //<--These will point into dyld once the process is set up!
+0x100000f83: nop    
+0x100000f84: pushq  $0x0              // <-- We just saw this
+0x100000f89: jmp    0x100000f74
+
+// Now let's run the process and see.  
+
+(lldb) b main
+Breakpoint 2: where = hello`main, address = 0x0000000100000f20
+(lldb) r
+Process 5711 launched: '/Users/user/cs59/x86/hello' (x86_64)
+Process 5711 stopped
+* thread #1: tid = 0x6784c8, 0x0000000100000f20 hello`main, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1 2.1
+    frame #0: 0x0000000100000f20 hello`main
+hello`main:
+->  0x100000f20 <+0>: pushq  %rbp
+    0x100000f21 <+1>: movq   %rsp, %rbp
+    0x100000f24 <+4>: subq   $0x10, %rsp
+    0x100000f28 <+8>: movl   $0x0, -0x4(%rbp)
+
+// Aha, here is the stub to dyld!
+
+(lldb) disas -s 0x100000f74
+    0x100000f74: leaq   0x8d(%rip), %r11          ; (void *)0x0000000000000000
+    0x100000f7b: pushq  %r11
+    0x100000f7d: jmpq   *0x7d(%rip)               ; (void *)0x00007fff8a94d2a0: dyld_stub_binder   //<-- there we go
+    0x100000f83: nop    
+    0x100000f84: pushq  $0x0
+    0x100000f89: jmp    0x100000f74
+    0x100000f8e: gs     
+    0x100000f90: insb   %dx, %es:(%rdi)
+    0x100000f91: insb   %dx, %es:(%rdi)
+    0x100000f92: outsl  (%rsi), %dx
+
+// So far, puts has not been called, the dyld stub has not resolved it. The puts stub still points to dyld stub:
+
+(lldb) mem read -s8 -fx 0x0000000100001010
+0x100001010: 0x0000000100000f84 0x0000000000000000
+0x100001020: 0x0000000000000000 0x0000000000000000
+0x100001030: 0x0000000000000000 0x0000000000000000
+0x100001040: 0x0000000000000000 0x0000000000000000
+
+// But let's get puts called once, and see what happens. We'll put a breakpoint just past puts:
+
+(lldb) disas -n main
+hello`main:
+->  0x100000f20 <+0>:  pushq  %rbp
+    0x100000f21 <+1>:  movq   %rsp, %rbp
+    0x100000f24 <+4>:  subq   $0x10, %rsp
+    0x100000f28 <+8>:  movl   $0x0, -0x4(%rbp)
+    0x100000f2f <+15>: movl   $0xa, -0x8(%rbp)
+    0x100000f36 <+22>: cmpl   $0x0, -0x8(%rbp)
+    0x100000f3d <+29>: jl     0x100000f63               ; <+67>
+    0x100000f43 <+35>: leaq   0x44(%rip), %rdi          ; "Hello"
+    0x100000f4a <+42>: callq  0x100000f6e               ; symbol stub for: puts
+    0x100000f4f <+47>: movl   -0x8(%rbp), %ecx    //<--- put it right here!
+    0x100000f52 <+50>: subl   $0x1, %ecx
+    0x100000f58 <+56>: movl   %ecx, -0x8(%rbp)
+    0x100000f5b <+59>: movl   %eax, -0xc(%rbp)
+    0x100000f5e <+62>: jmp    0x100000f36               ; <+22>
+    0x100000f63 <+67>: movl   $0x2a, %eax
+    0x100000f68 <+72>: addq   $0x10, %rsp
+    0x100000f6c <+76>: popq   %rbp
+    0x100000f6d <+77>: retq   
+
+(lldb) b 0x100000f4f
+Breakpoint 2: address = 0x0000000100000f4f
+
+(lldb) r
+Process 5779 launched: '/Users/user/cs59/x86/hello' (x86_64)
+Process 5779 stopped
+* thread #1: tid = 0x679002, 0x0000000100000f20 hello`main, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x0000000100000f20 hello`main
+hello`main:
+->  0x100000f20 <+0>: pushq  %rbp
+    0x100000f21 <+1>: movq   %rsp, %rbp
+    0x100000f24 <+4>: subq   $0x10, %rsp
+    0x100000f28 <+8>: movl   $0x0, -0x4(%rbp)
+
+// First, we stop at main, the address to dyld stub is still there for puts:
+
+(lldb) mem read -s8 -fx 0x0000000100001010
+0x100001010: 0x0000000100000f84 0x0000000000000000
+0x100001020: 0x0000000000000000 0x0000000000000000
+0x100001030: 0x0000000000000000 0x0000000000000000
+0x100001040: 0x0000000000000000 0x0000000000000000
+
+// Now let's actually get puts called:
+
+(lldb) c
+Process 5779 resuming
+Hello
+Process 5779 stopped
+* thread #1: tid = 0x679002, 0x0000000100000f4f hello`main + 47, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x0000000100000f4f hello`main + 47
+hello`main:
+->  0x100000f4f <+47>: movl   -0x8(%rbp), %ecx
+    0x100000f52 <+50>: subl   $0x1, %ecx
+    0x100000f58 <+56>: movl   %ecx, -0x8(%rbp)
+    0x100000f5b <+59>: movl   %eax, -0xc(%rbp)
+
+// And now the indirect jump address has changed---to where the code of puts has been loaded by the RTLD:
+
+(lldb) mem read -s8 -fx 0x0000000100001010
+0x100001010: 0x00007fff8d6b1c0b 0x0000000000000000   <--- 0x00007fff8d6b1c0b
+0x100001020: 0x0000000000000000 0x0000000000000000
+0x100001030: 0x0000000000000000 0x0000000000000000
+0x100001040: 0x0000000000000000 0x0000000000000000
+
+(lldb) disas -s 0x00007fff8d6b1c0b
+libsystem_c.dylib`puts:                   // <-- The debugger knows what it's called, having read the symbol table.
+    0x7fff8d6b1c0b <+0>:  pushq  %rbp     // <-- Looks like a standard function preamble
+    0x7fff8d6b1c0c <+1>:  movq   %rsp, %rbp
+    0x7fff8d6b1c0f <+4>:  pushq  %r15     // <-- note these registers being saved, as per ABI; they will be restored before returning
+    0x7fff8d6b1c11 <+6>:  pushq  %r14
+    0x7fff8d6b1c13 <+8>:  pushq  %rbx
+    0x7fff8d6b1c14 <+9>:  subq   $0x38, %rsp
+    0x7fff8d6b1c18 <+13>: leaq   -0x188bdbaf(%rip), %r14   ; __stack_chk_guard
+    0x7fff8d6b1c1f <+20>: movq   (%r14), %rax
+    0x7fff8d6b1c22 <+23>: movq   %rax, -0x20(%rbp)
+    0x7fff8d6b1c26 <+27>: testq  %rdi, %rdi
+(lldb) 
+
+This is how lazy linking works. On Linux, the table in which the addresses of functions,
+initially all pointing to the RTLD stub, are gathered, is called the Global Offset Table (GOT),
+and the collection of stubs is called the Procedure Linkage Table (PLT). PLT and GOT
+are somewhat different from MacOS's setup, but are based on the same idea.
+
+A Linux walkthrough (for a slightly different example) can be found here: 
+http://www.cs.dartmouth.edu/~sergey/cs258/dyn-linking-with-gdb.txt
+
+--------------------[ Overviews of the compilation process ]--------------------
+
+http://www.thegeekstuff.com/2011/10/c-program-to-an-executable/  --very brief overview
+http://www.tenouk.com/ModuleW.html                               --more detailed overview
+
+--------------------[ How dynamic linking & RTLD works on MacOS ]--------------------
+
+https://www.mikeash.com/pyblog/friday-qa-2012-11-09-dyld-dynamic-linking-on-os-x.html
+
+========================[ Local vs global variables ]========================
+
+$ cat hellos.c
+
+#include <stdio.h>
+
+int i = 10;   // <-- Now "i" is global
+
+int main()
+{
+     while( i >= 0 ){
+          puts( "Hello" );
+          i--;
+     }
+
+     return 0;
+}
+
+$ gcc -Wall -o hellos hellos.c
+
+$ gobjdump -d hellos
+
+hellos:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f20 <_main>:
+   100000f20:	55                   	push   %rbp
+   100000f21:	48 89 e5             	mov    %rsp,%rbp
+   100000f24:	48 83 ec 10          	sub    $0x10,%rsp
+   100000f28:	c7 45 fc 00 00 00 00 	movl   $0x0,-0x4(%rbp)
+   100000f2f:	81 3d df 00 00 00 00 	cmpl   $0x0,0xdf(%rip)        # 100001018 <_i>  // <-- "i" is addressed off of RIP, not stack-based RBP/EBP
+   100000f36:	00 00 00 
+   100000f39:	0f 8c 26 00 00 00    	jl     100000f65 <_main+0x45>
+   100000f3f:	48 8d 3d 48 00 00 00 	lea    0x48(%rip),%rdi        # 100000f8e <_puts$stub+0x20> // <-- Address of "Hello", as before
+   100000f46:	e8 23 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f4b:	8b 0d c7 00 00 00    	mov    0xc7(%rip),%ecx        # 100001018 <_i>  // <-- RIP-relative addressing is different for every instruction
+   100000f51:	81 c1 ff ff ff ff    	add    $0xffffffff,%ecx                         // <-- Adding a 4-byte representation of -1, in "2's complement" form
+   100000f57:	89 0d bb 00 00 00    	mov    %ecx,0xbb(%rip)        # 100001018 <_i>  // <-- Saving back to RAM/cache, RIP-relative offset adjusted again 
+   100000f5d:	89 45 f8             	mov    %eax,-0x8(%rbp)
+   100000f60:	e9 ca ff ff ff       	jmpq   100000f2f <_main+0xf>  // <-- Completing the loop
+   100000f65:	31 c0                	xor    %eax,%eax
+   100000f67:	48 83 c4 10          	add    $0x10,%rsp
+   100000f6b:	5d                   	pop    %rbp
+   100000f6c:	c3                   	retq   
+
+Disassembly of section __TEXT.__stubs:
+
+0000000100000f6e <_puts$stub>:
+   100000f6e:	ff 25 9c 00 00 00    	jmpq   *0x9c(%rip)        # 100001010 <_puts$stub>
+
+// Skipped the rest of disassembly.
+
+
+See also the in-class example of 
+
+$ cat l-vs-g.c
+#include <stdio.h>
+
+int x = 1;
+int y = 200;
+
+void g();
+
+int main()
+{
+     int x  = 100;                   // <-- this local overshadows the global. Try compiling with -Wshadow to see the warning.
+     printf( "x=%d y=%d\n", x, y);   // <-- x is local, y is global. Compare how accesses to them are compiled!
+
+     g();
+     return 0;
+}
+
+void g()
+{
+     printf( "x=%d\n", x);   // <-- global x . See how it's accessed
+     printf( "x=%d\n", x);   // <-- note the offset off RIP here and above. They are all different, for the same memory slot. Ugh.
+}
+
+$ gcc -Wshadow -o l-vs-g l-vs-g.c
+l-vs-g.c:10:10: warning: declaration shadows a variable in the global scope [-Wshadow]
+     int x  = 100;
+         ^
+l-vs-g.c:3:5: note: previous declaration is here
+int x = 1;
+    ^
+1 warning generated.
+
+// Find the accesses to the respective variables in the following disassembly, and explain them!
+
+$ gobjdump -d l-vs-g
+
+l-vs-g:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000ef0 <_main>:
+   100000ef0:    55                     push   %rbp
+   100000ef1:    48 89 e5               mov    %rsp,%rbp
+   100000ef4:    48 83 ec 10            sub    $0x10,%rsp
+   100000ef8:    48 8d 3d 8f 00 00 00   lea    0x8f(%rip),%rdi        # 100000f8e <_g+0x5e>
+   100000eff:    c7 45 fc 00 00 00 00   movl   $0x0,-0x4(%rbp)
+   100000f06:    c7 45 f8 64 00 00 00   movl   $0x64,-0x8(%rbp)
+   100000f0d:    8b 75 f8               mov    -0x8(%rbp),%esi
+   100000f10:    8b 15 06 01 00 00      mov    0x106(%rip),%edx        # 10000101c <_y>
+   100000f16:    b0 00                  mov    $0x0,%al
+   100000f18:    e8 4f 00 00 00         callq  100000f6c <_g+0x3c>
+   100000f1d:    89 45 f4               mov    %eax,-0xc(%rbp)
+   100000f20:    e8 0b 00 00 00         callq  100000f30 <_g>
+   100000f25:    31 c0                  xor    %eax,%eax
+   100000f27:    48 83 c4 10            add    $0x10,%rsp
+   100000f2b:    5d                     pop    %rbp
+   100000f2c:    c3                     retq   
+   100000f2d:    0f 1f 00               nopl   (%rax)   //<-- ask about it in class :)
+
+0000000100000f30 <_g>:
+   100000f30:    55                     push   %rbp
+   100000f31:    48 89 e5               mov    %rsp,%rbp
+   100000f34:    48 83 ec 10            sub    $0x10,%rsp
+   100000f38:    48 8d 3d 5a 00 00 00   lea    0x5a(%rip),%rdi        # 100000f99 <_g+0x69>
+   100000f3f:    8b 35 d3 00 00 00      mov    0xd3(%rip),%esi        # 100001018 <_x>
+   100000f45:    b0 00                  mov    $0x0,%al
+   100000f47:    e8 20 00 00 00         callq  100000f6c <_g+0x3c>
+   100000f4c:    48 8d 3d 46 00 00 00   lea    0x46(%rip),%rdi        # 100000f99 <_g+0x69>
+   100000f53:    8b 35 bf 00 00 00      mov    0xbf(%rip),%esi        # 100001018 <_x>
+   100000f59:    89 45 fc               mov    %eax,-0x4(%rbp)
+   100000f5c:    b0 00                  mov    $0x0,%al
+   100000f5e:    e8 09 00 00 00         callq  100000f6c <_g+0x3c>
+   100000f63:    89 45 f8               mov    %eax,-0x8(%rbp)
+   100000f66:    48 83 c4 10            add    $0x10,%rsp
+   100000f6a:    5d                     pop    %rbp
+   100000f6b:    c3                     retq   
+
+//
+// ===========================[ Recursion ]===========================
+//
+
+$ cat fact.c
+#include <stdio.h>
+
+/* a very naive recursive factorial */
+unsigned int fact(unsigned int n)
+{
+     if( n == 0 )
+          return 1;
+     if( 1 == n )
+          return 1;
+     return n * fact(n-1);
+}
+
+int main()
+{
+     int i;
+     for( i = 0; i < 10; i++ ){ 
+          printf("%d\n", fact(i));
+     }
+
+     return 0;
+}
+
+// It works:
+
+$ ./fact
+1
+1
+2
+6
+24
+120
+720
+5040
+40320
+362880
+
+
+// Read through this disassembly to see how compiling recursive functions works.
+//   Note that the same code of fact() works with multiple representations of
+//   this function's arguments and internal variables (such as "n-1"). 
+// 
+/  The invention of the stack was a major advance in representing a repeatable, 
+//   self-similar computation, in which intermediary state could be saved away 
+//   and then returned to. Keep in mind, though, that this is only a partial case
+//   of a computation that depends on some environment created by previous 
+//   computations and dependent on their results. Modern functional languages
+//   provide richer models of such computations.
+
+$ gobjdump -d fact
+
+fact:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000eb0 <_fact>:
+   100000eb0:	55                   	push   %rbp              // set up stack frame
+   100000eb1:	48 89 e5             	mov    %rsp,%rbp
+   100000eb4:	48 83 ec 10          	sub    $0x10,%rsp
+   100000eb8:	31 c0                	xor    %eax,%eax         // <-- prepare a 0 to compare with, just 2 bytes
+   100000eba:	89 7d f8             	mov    %edi,-0x8(%rbp)   // <-- Save the 1st argument (n) into frame at offset -8 
+   100000ebd:	3b 45 f8             	cmp    -0x8(%rbp),%eax         // n == 0 ?
+   100000ec0:	0f 85 0c 00 00 00    	jne    100000ed2 <_fact+0x22>  // if n != 0, jump to (*) below
+   100000ec6:	c7 45 fc 01 00 00 00 	movl   $0x1,-0x4(%rbp)         // else put 1 where the result goes
+   100000ecd:	e9 39 00 00 00       	jmpq   100000f0b <_fact+0x5b>  //   and jump to end of function 
+   100000ed2:	b8 01 00 00 00       	mov    $0x1,%eax               // (*)
+   100000ed7:	3b 45 f8             	cmp    -0x8(%rbp),%eax         // n == 1 ?
+   100000eda:	0f 85 0c 00 00 00    	jne    100000eec <_fact+0x3c>  // if n != 1, jump to (**)
+   100000ee0:	c7 45 fc 01 00 00 00 	movl   $0x1,-0x4(%rbp)         // else put 1 where the result goes 
+   100000ee7:	e9 1f 00 00 00       	jmpq   100000f0b <_fact+0x5b>  //   and jump to where the function returns, (xx)
+   100000eec:	8b 45 f8             	mov    -0x8(%rbp),%eax         // (**) OK, time to set up the main case, n * f(n-1)  
+   100000eef:	8b 4d f8             	mov    -0x8(%rbp),%ecx         //  saved n goes into eax and ecx
+   100000ef2:	81 e9 01 00 00 00    	sub    $0x1,%ecx               // prepare n-1 in ecx
+   100000ef8:	89 cf                	mov    %ecx,%edi               //   and copy it to EDI, to pass it as argument to function call
+   100000efa:	89 45 f4             	mov    %eax,-0xc(%rbp)         // save n in at the offset -c in the frame 
+   100000efd:	e8 ae ff ff ff       	callq  100000eb0 <_fact>       // call self! this will create a _new_ stack frame 
+   100000f02:	8b 4d f4             	mov    -0xc(%rbp),%ecx         //  we return here. eax contains f(n-1). ebp points into _our_ frame again, because of (***) below
+   100000f05:	0f af c8             	imul   %eax,%ecx               // this gets n multiplied by returned f(n-1) in eax
+   100000f08:	89 4d fc             	mov    %ecx,-0x4(%rbp)         // save the result; this could be optimized out
+   100000f0b:	8b 45 fc             	mov    -0x4(%rbp),%eax         //  (xx) leaving function; must put result in eax
+   100000f0e:	48 83 c4 10          	add    $0x10,%rsp        // readjust the stack
+   100000f12:	5d                   	pop    %rbp              // restore previous call's ebp -- (***)  
+   100000f13:	c3                   	retq                 
+   100000f14:	66 66 66 2e 0f 1f 84 	data32 data32 nopw %cs:0x0(%rax,%rax,1)
+   100000f1b:	00 00 00 00 00 
+
+0000000100000f20 <_main>:
+   100000f20:	55                   	push   %rbp
+   100000f21:	48 89 e5             	mov    %rsp,%rbp
+   100000f24:	48 83 ec 10          	sub    $0x10,%rsp
+   100000f28:	c7 45 fc 00 00 00 00 	movl   $0x0,-0x4(%rbp)
+   100000f2f:	c7 45 f8 00 00 00 00 	movl   $0x0,-0x8(%rbp)
+   100000f36:	81 7d f8 0a 00 00 00 	cmpl   $0xa,-0x8(%rbp)
+   100000f3d:	0f 8d 2b 00 00 00    	jge    100000f6e <_main+0x4e>
+   100000f43:	8b 7d f8             	mov    -0x8(%rbp),%edi
+   100000f46:	e8 65 ff ff ff       	callq  100000eb0 <_fact>
+   100000f4b:	48 8d 3d 44 00 00 00 	lea    0x44(%rip),%rdi        # 100000f96 <_printf$stub+0x20>
+   100000f52:	89 c6                	mov    %eax,%esi
+   100000f54:	b0 00                	mov    $0x0,%al
+   100000f56:	e8 1b 00 00 00       	callq  100000f76 <_printf$stub>
+   100000f5b:	89 45 f4             	mov    %eax,-0xc(%rbp)
+   100000f5e:	8b 45 f8             	mov    -0x8(%rbp),%eax
+   100000f61:	05 01 00 00 00       	add    $0x1,%eax
+   100000f66:	89 45 f8             	mov    %eax,-0x8(%rbp)
+   100000f69:	e9 c8 ff ff ff       	jmpq   100000f36 <_main+0x16>
+   100000f6e:	31 c0                	xor    %eax,%eax
+   100000f70:	48 83 c4 10          	add    $0x10,%rsp
+   100000f74:	5d                   	pop    %rbp
+   100000f75:	c3                   	retq   
+
+Disassembly of section __TEXT.__stubs:
+
+0000000100000f76 <_printf$stub>:
+   100000f76:	ff 25 94 00 00 00    	jmpq   *0x94(%rip)        # 100001010 <_printf$stub>
+
+// Skipped.
+
+// Read through this example, and acquire an understanding how the naive recursive factorial 
+//   gets its values! Step through the example to see how frames build up on the stack,
+//   allowing _the same code_ to operate on completely different values in each frame!
+

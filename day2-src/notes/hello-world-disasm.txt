@@ -1,0 +1,355 @@
+
+// Building and disassembling a simple hello world on MacOS X Yosemite.
+//   Note that the 'gcc' compiler here is actually LLVM, not GCC!
+//   If you do the same example on recent Linux, you will see that
+//    the compiled code is different; for example, the base pointer RBP
+//    is not used, and accesses to stack variables are made off of RSP.
+//    Cf. footnote 7 on p.16 of the amd64 ABI spec and GCC's option
+//       -fomit-frame-pointer
+
+// Commands start with $, my comments start with // , the rest is output.
+
+$ cat hello.c
+#include <stdio.h>
+
+int main()
+{
+     int i = 10;
+     
+     while( i >= 0 ){
+          puts( "Hello" );
+          i = i - 1;
+     }
+
+     return 0;
+}
+
+// Building it natively for x86_64. Please note, this is an _unoptimized_ build! 
+//  Much of the code is "just in case" code, and will be optimized away;
+//  optimized code will look very different for -O1, even more so for -O2
+
+$ gcc -Wall -o hello hello.c
+
+// "magic" confirms that's what we got:
+
+$ file hello
+hello: Mach-O 64-bit executable x86_64
+
+// Generating unoptimized assembly gives:
+
+$ gcc -S hello.c
+
+// Stripping the clutter of exception-handling .cfi pragmas
+
+$ grep -v cfi hello.s > hello1.s 
+
+// See line-by-line comments on instructions below
+
+$ cat hello1.s 
+	.section	__TEXT,__text,regular,pure_instructions
+	.macosx_version_min 10, 10
+	.globl	_main
+	.align	4, 0x90
+_main:                                  ## @main
+## BB#0:
+	pushq	%rbp
+Ltmp0:
+Ltmp1:
+	movq	%rsp, %rbp
+Ltmp2:
+	subq	$16, %rsp
+	movl	$0, -4(%rbp)
+	movl	$10, -8(%rbp)
+LBB0_1:                                 ## =>This Inner Loop Header: Depth=1
+	cmpl	$0, -8(%rbp)
+	jl	LBB0_3
+## BB#2:                                ##   in Loop: Header=BB0_1 Depth=1
+	leaq	L_.str(%rip), %rdi
+	callq	_puts
+	movl	-8(%rbp), %ecx
+	subl	$1, %ecx
+	movl	%ecx, -8(%rbp)
+	movl	%eax, -12(%rbp)         ## 4-byte Spill
+	jmp	LBB0_1
+LBB0_3:
+	xorl	%eax, %eax
+	addq	$16, %rsp
+	popq	%rbp
+	retq
+
+	.section	__TEXT,__cstring,cstring_literals
+L_.str:                                 ## @.str
+	.asciz	"Hello"
+
+
+.subsections_via_symbols
+
+// Finish compilation:
+
+$ gcc -Wall -o hello hello.c
+
+// Disassembling all that looks like code inside the compiled binary.
+//   Note that the disassembled instructions are the same, but the output
+//   format is slightly different, e.g., immediate values are printed in hex.
+// Also, you get to see the actual bytes with which instructions are encoded.
+//   Note that some are just one byte, others many; observe how immediate arguments
+//   are included in the instruction.
+
+$ gobjdump -d hello
+
+hello:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f20 <_main>:
+   100000f20:	55                   	push   %rbp        // <-- standard preamble for stack frames with ebp as a base pointer
+   100000f21:	48 89 e5             	mov    %rsp,%rbp   // <--  copy stack pointer into rbp, to reference any value in frame
+   100000f24:	48 83 ec 10          	sub    $0x10,%rsp  // <-- this reserves 16 bytes for the local storage (including "i")
+   100000f28:	c7 45 fc 00 00 00 00 	movl   $0x0,-0x4(%rbp)  // <-- these 4 bytes will not be used; 0-ed out just in case
+   100000f2f:	c7 45 f8 0a 00 00 00 	movl   $0xa,-0x8(%rbp)  // <-- the 4-byte "i" gets a 4-byte value of 10
+   100000f36:	81 7d f8 00 00 00 00 	cmpl   $0x0,-0x8(%rbp)  // <-- start of the while loop; "i" compared with a 4-byte 0 
+   100000f3d:	0f 8c 20 00 00 00    	jl     100000f63 <_main+0x43>  // <-- jump past the loop, to return
+   100000f43:	48 8d 3d 44 00 00 00 	lea    0x44(%rip),%rdi        # 100000f8e <_puts$stub+0x22> // <-- that's where "hello" is
+   100000f4a:	e8 1d 00 00 00       	callq  100000f6c <_puts$stub>   // puts called with "hello" as its 1st argument (in rdi)
+   100000f4f:	8b 4d f8             	mov    -0x8(%rbp),%ecx      // fetching "i" 
+   100000f52:	81 e9 01 00 00 00    	sub    $0x1,%ecx            //   subtracting 1 from that value
+   100000f58:	89 4d f8             	mov    %ecx,-0x8(%rbp)      //   and writing it back; now i=i-1 is done.
+   100000f5b:	89 45 f4             	mov    %eax,-0xc(%rbp)      // save the return value of puts, just in case 
+   100000f5e:	e9 d3 ff ff ff       	jmpq   100000f36 <_main+0x16>  // <-- this backward jump makes the loop
+   100000f63:	31 c0                	xor    %eax,%eax               // <-- prepare the 0 to return from main
+   100000f65:	48 83 c4 10          	add    $0x10,%rsp              // <-- bring the stack pointer back past "i"
+   100000f69:	5d                   	pop    %rbp                    // <-- pop the saved ebp from the previous frame back into ebp
+   100000f6a:	c3                   	retq                           // <-- pop the saved return address into rip
+
+Disassembly of section __TEXT.__stubs:
+
+// This is a "stub" where the call to puts will land. The memory location 0x100001010 currently
+//  contains the entry point of dyld, which, when called, will load the library containing the puts
+//  implementation, and will put the address of that implementation into 0x100001010---so that
+//  any following calls to puts will directly jump to that implementation.
+
+0000000100000f6c <_puts$stub>:
+   100000f6c:	ff 25 9e 00 00 00    	jmpq   *0x9e(%rip)        # 100001010 <_puts$stub>
+
+Disassembly of section __TEXT.__stub_helper:
+
+<more disasm of helper code skipped>
+
+// A different way to disasm the same code: 
+
+$ otool -tv hello
+hello:
+(__TEXT,__text) section
+_main:
+0000000100000f20	pushq	%rbp
+0000000100000f21	movq	%rsp, %rbp
+0000000100000f24	subq	$0x10, %rsp
+0000000100000f28	movl	$0x0, -0x4(%rbp)
+0000000100000f2f	movl	$0xa, -0x8(%rbp)
+0000000100000f36	cmpl	$0x0, -0x8(%rbp)
+0000000100000f3d	jl	0x100000f63
+0000000100000f43	leaq	0x44(%rip), %rdi
+0000000100000f4a	callq	0x100000f6c
+0000000100000f4f	movl	-0x8(%rbp), %ecx
+0000000100000f52	subl	$0x1, %ecx
+0000000100000f58	movl	%ecx, -0x8(%rbp)
+0000000100000f5b	movl	%eax, -0xc(%rbp)
+0000000100000f5e	jmp	0x100000f36
+0000000100000f63	xorl	%eax, %eax
+0000000100000f65	addq	$0x10, %rsp
+0000000100000f69	popq	%rbp
+0000000100000f6a	retq
+
+$ gdb ./hello
+bash: gdb: command not found
+
+// Um, OK. This is not Linux :) 
+
+$ gdb-apple ./hello
+GNU gdb 6.3.50.20050815-cvs (Thu Aug 27 13:01:51 UTC 2015)
+Copyright 2004 Free Software Foundation, Inc.
+GDB is free software, covered by the GNU General Public License, and you are
+welcome to change it and/or distribute copies of it under certain conditions.
+Type "show copying" to see the conditions.
+There is absolutely no warranty for GDB.  Type "show warranty" for details.
+This GDB was configured as "--host=i686-apple-darwin14.5.0 --target="...Reading symbols for shared libraries 2016-03-30 14:29:04.379 gdb-apple[40594:1502999] Metadata.framework [Error]: couldn't get the client port
+.. done
+
+(gdb) b main
+Breakpoint 1 at 0x100000f28
+
+(gdb) disas main
+Dump of assembler code for function main:
+0x0000000100000f20 <main+0>:	push   %rbp
+0x0000000100000f21 <main+1>:	mov    %rsp,%rbp
+0x0000000100000f24 <main+4>:	sub    $0x10,%rsp
+0x0000000100000f28 <main+8>:	movl   $0x0,-0x4(%rbp)
+0x0000000100000f2f <main+15>:	movl   $0xa,-0x8(%rbp)
+0x0000000100000f36 <main+22>:	cmpl   $0x0,-0x8(%rbp)
+0x0000000100000f3d <main+29>:	jl     0x100000f63 <main+67>
+0x0000000100000f43 <main+35>:	lea    0x44(%rip),%rdi        # 0x100000f8e
+0x0000000100000f4a <main+42>:	callq  0x100000f6c <dyld_stub_puts>
+0x0000000100000f4f <main+47>:	mov    -0x8(%rbp),%ecx
+0x0000000100000f52 <main+50>:	sub    $0x1,%ecx
+0x0000000100000f58 <main+56>:	mov    %ecx,-0x8(%rbp)
+0x0000000100000f5b <main+59>:	mov    %eax,-0xc(%rbp)
+0x0000000100000f5e <main+62>:	jmpq   0x100000f36 <main+22>
+0x0000000100000f63 <main+67>:	xor    %eax,%eax
+0x0000000100000f65 <main+69>:	add    $0x10,%rsp
+0x0000000100000f69 <main+73>:	pop    %rbp
+0x0000000100000f6a <main+74>:	retq   
+End of assembler dump.
+
+(gdb) si
+The program is not being run.
+
+// Right, to step by instruction, the program must be loaded, initialized, and running.
+//  There's a lot of code that must be run before main(), for example.
+
+(gdb) r
+Starting program: /Users/user/cs59/x86/hello 
+Reading symbols for shared libraries +....warning: Could not find object file "/BinaryCache/corecrypto/corecrypto-233.1.2~26/Symbols/BuiltProducts/libcorecrypto_static.a(AES.o)" - no debug information available for "AES.s".
+
+warning: Could not find object file "/BinaryCache/corecrypto/corecrypto-233.1.2~26/Symbols/BuiltProducts/libcorecrypto_static.a(FIPSPOST.o)" - no debug information available for "FIPSPOST.c".
+
+// lots and lots of warnings about missing debug info skipped. This is not a debug build of the MacOS, of course.
+
+..........bfd_mach_o_scan_read_symtab_symbol: symbol "_bzero" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_memccpy" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_memchr" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_memcmp" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_memcpy" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_memmove" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_memset" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_strchr" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_strcmp" is unsupported 'indirect' reference: setting to undefined
+bfd_mach_o_scan_read_symtab_symbol: symbol "_strncmp" is unsupported 'indirect' reference: setting to undefined
+
+//  more warnings skipped.
+  
+....................... done
+
+// Finally, we hit a breakpoint at main():
+
+Breakpoint 1, 0x0000000100000f28 in main ()
+
+// Note that the breakpoint is _past_ the preamble and the local storage reservation on the stack.
+//  Thus rbp and rsp are already set by the preamble, and rsp is pointing past "i", too.
+//  We are about to execute the instruction at 0x100000f28. 
+
+(gdb) si
+0x0000000100000f2f in main ()
+
+// Now the next instruction is at 0x100000f2f. We are about to write 10 (0xa) into "i", but
+//  haven't done so yet. Let's look up that memory location---first we need to know ebp:
+
+(gdb) i r
+rax            0x100000f20	4294971168
+rbx            0x0	0
+rcx            0x7fff5fbff9f8	140734799804920
+rdx            0x7fff5fbff8f0	140734799804656
+rsi            0x7fff5fbff8e0	140734799804640
+rdi            0x1	1
+rbp            0x7fff5fbff8c0	0x7fff5fbff8c0    <<---
+rsp            0x7fff5fbff8b0	0x7fff5fbff8b0
+r8             0x0	0
+r9             0x7fff5fbfe988	140734799800712
+r10            0x32	50
+r11            0x246	582
+r12            0x0	0
+r13            0x0	0
+r14            0x0	0
+r15            0x0	0
+rip            0x100000f2f	0x100000f2f <main+15>
+eflags         0x202	514
+cs             0x2b	43
+ss             0x0	0
+ds             0x0	0
+es             0x0	0
+fs             0x0	0
+gs             0x0	0
+
+// And now let's check what is currently stored at -8(%rbp):
+
+(gdb) x/x 0x7fff5fbff8c0-8
+0x7fff5fbff8b8: 0x5fc01036
+
+// ...and now we write it:
+
+(gdb) si
+0x0000000100000f36 in main ()
+
+// Indeed:
+
+(gdb) x/x 0x7fff5fbff8c0-8
+0x7fff5fbff8b8: 0x0000000a
+
+(gdb) i r
+rax            0x100000f20	4294971168
+rbx            0x0	0
+rcx            0x7fff5fbff9f8	140734799804920
+rdx            0x7fff5fbff8f0	140734799804656
+rsi            0x7fff5fbff8e0	140734799804640
+rdi            0x1	1
+rbp            0x7fff5fbff8c0	0x7fff5fbff8c0
+rsp            0x7fff5fbff8b0	0x7fff5fbff8b0
+r8             0x0	0
+r9             0x7fff5fbfe988	140734799800712
+r10            0x32	50
+r11            0x246	582
+r12            0x0	0
+r13            0x0	0
+r14            0x0	0
+r15            0x0	0
+rip            0x100000f36	0x100000f36 <main+22>
+eflags         0x202	514
+cs             0x2b	43
+ss             0x0	0
+ds             0x0	0
+es             0x0	0
+fs             0x0	0
+gs             0x0	0
+
+// Let's see that the string constant to be passed to puts is indeed "Hello\0":
+//  This string is addressed off of %rip rather than by an absolute address;
+//    this trick serves to both save a few bytes and make the code easier to 
+//    relocate the code, i.e., load it at a different address. (It's presumed 
+//    that if the code is loaded at a different address, the strings will be 
+//    loaded in the same relative position to it).
+
+(gdb) x/10c 0x100000f8e
+0x100000f8e:    72 'H'  101 'e' 108 'l' 108 'l' 111 'o' 0 '\0'  1 '\001'        0 '\0'
+0x100000f96:    0 '\0'  0 '\0'
+
+(gdb) x/s 0x100000f8e
+0x100000f8e:     "Hello"
+
+// We can reset the value of "i" at this point, and shorten the loop. Note that 
+//  we need to specify the size of the value we are writing, exactly 4 bytes for an "int".
+//   
+
+(gdb) set {int} 0x7fff5fbff8b8 = 5
+(gdb) c
+Continuing.
+Hello
+Hello
+Hello
+Hello
+Hello
+Hello
+
+Program exited normally.
+(gdb) q
+$ exit
+
+// BTW, otool will show us the strings section as well as code (see -tv above).
+//  Use "man ascii" to read the strings and find "Hello":
+
+otool -sv __TEXT __cstring hello
+hello:
+Contents of (__TEXT,__cstring) section
+0000000100000f8e               48 65 6c 6c 6f 00 
+
+
+

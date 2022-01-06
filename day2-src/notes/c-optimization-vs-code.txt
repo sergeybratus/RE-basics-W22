@@ -1,0 +1,419 @@
+
+// How optimization and compilation options change the code.
+
+// The book I mentioned today: Bob Neveln, "Linux Assembly Language Programming",
+//   (https://www.amazon.com/Linux-Assembly-Language-Programming-Neveln/dp/0130879401)
+// Amazon has good deals on used copies of this book (essentially, shipping costs). 
+
+$ cat hello.c
+#include <stdio.h>
+
+int main()
+{
+     int i = 10;
+     
+     while( i >= 0 ){
+          puts( "Hello" );
+          i = i - 1;
+     }
+
+     return 42;
+}
+
+$ gcc -o hello hello.c
+$ gobjdump -d hello 
+
+hello:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f20 <_main>:
+   100000f20:    55                     push   %rbp
+   100000f21:    48 89 e5               mov    %rsp,%rbp
+   100000f24:    48 83 ec 10            sub    $0x10,%rsp
+   100000f28:    c7 45 fc 00 00 00 00   movl   $0x0,-0x4(%rbp)
+   100000f2f:    c7 45 f8 0a 00 00 00   movl   $0xa,-0x8(%rbp)          // i := 10
+   100000f36:    81 7d f8 00 00 00 00   cmpl   $0x0,-0x8(%rbp)
+   100000f3d:    0f 8c 20 00 00 00      jl     100000f63 <_main+0x43>   
+   100000f43:    48 8d 3d 44 00 00 00   lea    0x44(%rip),%rdi        # 100000f8e <_main+0x6e> // "hello"
+   100000f4a:    e8 1f 00 00 00         callq  100000f6e <_main+0x4e>   // puts
+   100000f4f:    8b 4d f8               mov    -0x8(%rbp),%ecx          // load i from stack frame 
+   100000f52:    81 e9 01 00 00 00      sub    $0x1,%ecx                //   decrement i
+   100000f58:    89 4d f8               mov    %ecx,-0x8(%rbp)          // store i into stack frame
+   100000f5b:    89 45 f4               mov    %eax,-0xc(%rbp)          // store return value of puts (see "man puts")
+   100000f5e:    e9 d3 ff ff ff         jmpq   100000f36 <_main+0x16>   // loop back
+   100000f63:    b8 2a 00 00 00         mov    $0x2a,%eax
+   100000f68:    48 83 c4 10            add    $0x10,%rsp
+   100000f6c:    5d                     pop    %rbp
+   100000f6d:    c3                     retq   
+
+<skipped>
+
+// Next level of optimization: local var i is stored in register, costly
+//  memory loads and stores from/to the stack frame are eliminated 
+
+$ gcc -o hello1 -O1 hello.c
+
+$ gobjdump -d hello1 
+
+hello1:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f40 <_main>:
+   100000f40:    55                     push   %rbp
+   100000f41:    48 89 e5               mov    %rsp,%rbp
+   100000f44:    41 56                  push   %r14             // R14 is caller-saved: we are expected to restore it
+   100000f46:    53                     push   %rbx
+   100000f47:    bb 0b 00 00 00         mov    $0xb,%ebx        // "i" is now held in EBX & initialized to 11, not 10! 
+   100000f4c:    4c 8d 35 47 00 00 00   lea    0x47(%rip),%r14        # 100000f9a <_main+0x5a>  // "hello"
+   100000f53:    66 66 66 66 2e 0f 1f   data16 data16 data16 nopw %cs:0x0(%rax,%rax,1)  // multi-byte NOP (13 bytes)
+   100000f5a:    84 00 00 00 00 00 
+   100000f60:    4c 89 f7               mov    %r14,%rdi               // start of loop, 16-byte aligned address
+   100000f63:    e8 10 00 00 00         callq  100000f78 <_main+0x38>  // puts
+   100000f68:    ff cb                  dec    %ebx                    // decrement "i" 
+   100000f6a:    85 db                  test   %ebx,%ebx               //  test for 0
+   100000f6c:    7f f2                  jg     100000f60 <_main+0x20>  // loop back, 16-byte aligned is better for branch prediction 
+   100000f6e:    b8 2a 00 00 00         mov    $0x2a,%eax
+   100000f73:    5b                     pop    %rbx
+   100000f74:    41 5e                  pop    %r14             // restoring R14 to what it was in the previous function's context
+   100000f76:    5d                     pop    %rbp
+   100000f77:    c3                     retq   
+
+<skipped>
+
+// The next optimization level applies "loop unrolling". Branches are 
+//   expensive, because they interfere with processor's pipelining of instructions;
+//   when possible (i.e., the number of iterations is a constant known at
+//   compile time) loops are unrolled into simple repetition of loop body code:
+
+$ gcc -o hello2 -O2 hello.c
+$ gobjdump -d hello2 | less
+
+hello2:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f00 <_main>:
+   100000f00:    55                     push   %rbp
+   100000f01:    48 89 e5               mov    %rsp,%rbp
+   100000f04:    53                     push   %rbx
+   100000f05:    50                     push   %rax
+   100000f06:    48 8d 1d 85 00 00 00   lea    0x85(%rip),%rbx        # 100000f92 <_main+0x92>
+   100000f0d:    48 89 df               mov    %rbx,%rdi
+   100000f10:    e8 5d 00 00 00         callq  100000f72 <_main+0x72>
+   100000f15:    48 89 df               mov    %rbx,%rdi
+   100000f18:    e8 55 00 00 00         callq  100000f72 <_main+0x72>
+   100000f1d:    48 89 df               mov    %rbx,%rdi
+   100000f20:    e8 4d 00 00 00         callq  100000f72 <_main+0x72>
+   100000f25:    48 89 df               mov    %rbx,%rdi
+   100000f28:    e8 45 00 00 00         callq  100000f72 <_main+0x72>
+   100000f2d:    48 89 df               mov    %rbx,%rdi
+   100000f30:    e8 3d 00 00 00         callq  100000f72 <_main+0x72>
+   100000f35:    48 89 df               mov    %rbx,%rdi
+   100000f38:    e8 35 00 00 00         callq  100000f72 <_main+0x72>
+   100000f3d:    48 89 df               mov    %rbx,%rdi
+   100000f40:    e8 2d 00 00 00         callq  100000f72 <_main+0x72>
+   100000f45:    48 89 df               mov    %rbx,%rdi
+   100000f48:    e8 25 00 00 00         callq  100000f72 <_main+0x72>
+   100000f4d:    48 89 df               mov    %rbx,%rdi
+   100000f50:    e8 1d 00 00 00         callq  100000f72 <_main+0x72>
+   100000f55:    48 89 df               mov    %rbx,%rdi
+   100000f58:    e8 15 00 00 00         callq  100000f72 <_main+0x72>
+   100000f5d:    48 89 df               mov    %rbx,%rdi
+   100000f60:    e8 0d 00 00 00         callq  100000f72 <_main+0x72>
+   100000f65:    b8 2a 00 00 00         mov    $0x2a,%eax
+   100000f6a:    48 83 c4 08            add    $0x8,%rsp
+   100000f6e:    5b                     pop    %rbx
+   100000f6f:    5d                     pop    %rbp
+   100000f70:    c3                     retq   
+
+<skipped>
+
+$ gcc -o hello3 -O3 hello.c
+
+<same as -O2>
+
+$ gobjdump -d hello3 | less
+$ gcc -o hello4 -O4 hello.c
+clang: warning: -O4 is equivalent to -O3
+
+$ gcc -o hello4 -O5 hello.c
+warning: optimization level '-O5' is not supported; using '-O3' instead
+1 warning generated.
+
+// Look at the -f options. You can change so many things about compiler's behavior!
+
+$ gcc --help | less
+
+// Compiling without the frame pointer. Now all contents of the stack
+//   frame, including the local variable i, are accessed via offsets
+//   off of RSP:
+
+$ gcc -Wall -o hello-nofp -fomit-frame-pointer hello.c
+
+$ gobjdump -d hello-nofp 
+
+hello:     file format mach-o-x86-64
+
+Disassembly of section .text:
+
+0000000100000f20 <_main>:
+   100000f20:    48 83 ec 18            sub    $0x18,%rsp
+   100000f24:    c7 44 24 14 00 00 00   movl   $0x0,0x14(%rsp)
+   100000f2b:    00 
+   100000f2c:    c7 44 24 10 0a 00 00   movl   $0xa,0x10(%rsp)
+   100000f33:    00 
+   100000f34:    81 7c 24 10 00 00 00   cmpl   $0x0,0x10(%rsp)
+   100000f3b:    00 
+   100000f3c:    0f 8c 23 00 00 00      jl     100000f65 <_main+0x45>
+   100000f42:    48 8d 3d 49 00 00 00   lea    0x49(%rip),%rdi        # 100000f92 <_main+0x72> // "hello"
+   100000f49:    e8 22 00 00 00         callq  100000f70 <_main+0x50>  // puts
+   100000f4e:    8b 4c 24 10            mov    0x10(%rsp),%ecx         // load i 
+   100000f52:    81 e9 01 00 00 00      sub    $0x1,%ecx               //   decrement i by 1
+   100000f58:    89 4c 24 10            mov    %ecx,0x10(%rsp)         // store i 
+   100000f5c:    89 44 24 0c            mov    %eax,0xc(%rsp)          // return value of puts saved in frame 
+   100000f60:    e9 cf ff ff ff         jmpq   100000f34 <_main+0x14>
+   100000f65:    b8 2a 00 00 00         mov    $0x2a,%eax
+   100000f6a:    48 83 c4 18            add    $0x18,%rsp
+   100000f6e:    c3                     retq   
+
+<skipped>
+
+$ gobjdump -d hello | less
+$ cat struct.c
+#include <stdio.h>
+
+/* Use this simple program to see how struct member accesses 
+   are compiled. */
+
+struct item {
+     int  num;
+     char *name;
+};
+
+struct item it[3] = { {1, "foo"}, {2, "bar"}, {3, "baz"} };
+
+int main()
+{
+     int k;
+
+     struct item *p;
+
+     for(k = 1; k < 4; k++)
+          printf("item %d: %s\n", it[k-1].num, it[k-1].name);
+
+     /* comment this out first */
+     //p = &it[0]; /* recall that [] has higher precedence than & (address-of); 
+     //               cf. http://en.cppreference.com/w/c/language/operator_precedence */
+     //for(k = 1; k < 4; k++){
+     //     printf("item %d again: %s\n", p->num, p->name);
+     //     p++;
+     //}
+     
+
+     return 42;
+}
+
+$ gcc -Wall -o struct struct.c
+struct.c:17:19: warning: unused variable 'p' [-Wunused-variable]
+     struct item *p;
+                  ^
+1 warning generated.
+
+$ ./struct
+item 1: foo
+item 2: bar
+item 3: baz
+
+$ gobjdump -d struct 
+
+<skipped>
+
+// this gives us a few annotations of the disassembled code that lldb below misses,
+//  such as the address of the global "it"
+
+struct:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000ee0 <_main>:
+   100000ee0:    55                     push   %rbp
+   100000ee1:    48 89 e5               mov    %rsp,%rbp
+   100000ee4:    48 83 ec 20            sub    $0x20,%rsp
+   100000ee8:    c7 45 fc 00 00 00 00   movl   $0x0,-0x4(%rbp)
+   100000eef:    c7 45 f8 01 00 00 00   movl   $0x1,-0x8(%rbp)
+   100000ef6:    81 7d f8 04 00 00 00   cmpl   $0x4,-0x8(%rbp)
+   100000efd:    0f 8d 57 00 00 00      jge    100000f5a <_main+0x7a>
+   100000f03:    48 8d 3d 88 00 00 00   lea    0x88(%rip),%rdi        # 100000f92 <_main+0xb2>
+   100000f0a:    48 8d 05 0f 01 00 00   lea    0x10f(%rip),%rax        # 100001020 <_it>
+   100000f11:    8b 4d f8               mov    -0x8(%rbp),%ecx
+   100000f14:    81 e9 01 00 00 00      sub    $0x1,%ecx
+   100000f1a:    48 63 d1               movslq %ecx,%rdx
+   100000f1d:    48 c1 e2 04            shl    $0x4,%rdx
+   100000f21:    48 89 c6               mov    %rax,%rsi
+   100000f24:    48 01 d6               add    %rdx,%rsi
+   100000f27:    8b 36                  mov    (%rsi),%esi
+   100000f29:    8b 4d f8               mov    -0x8(%rbp),%ecx
+   100000f2c:    81 e9 01 00 00 00      sub    $0x1,%ecx
+   100000f32:    48 63 d1               movslq %ecx,%rdx
+   100000f35:    48 c1 e2 04            shl    $0x4,%rdx
+   100000f39:    48 01 d0               add    %rdx,%rax
+   100000f3c:    48 8b 50 08            mov    0x8(%rax),%rdx
+   100000f40:    b0 00                  mov    $0x0,%al
+   100000f42:    e8 1f 00 00 00         callq  100000f66 <_main+0x86>
+   100000f47:    89 45 ec               mov    %eax,-0x14(%rbp)
+   100000f4a:    8b 45 f8               mov    -0x8(%rbp),%eax
+   100000f4d:    05 01 00 00 00         add    $0x1,%eax
+   100000f52:    89 45 f8               mov    %eax,-0x8(%rbp)
+   100000f55:    e9 9c ff ff ff         jmpq   100000ef6 <_main+0x16>
+   100000f5a:    b8 2a 00 00 00         mov    $0x2a,%eax
+   100000f5f:    48 83 c4 20            add    $0x20,%rsp
+   100000f63:    5d                     pop    %rbp
+   100000f64:    c3                     retq   
+
+// recompiling with debugging support, for a slightly more verbose disasm:
+
+$ gcc -g -Wall -o struct struct.c
+struct.c:17:19: warning: unused variable 'p' [-Wunused-variable]
+     struct item *p;
+                  ^
+1 warning generated.
+
+// The struct item holds an integer (4 bytes) and a pointer (8 bytes == 64 bits). 
+//  So you might expect the size of struct item to be 12 bytes---but instead it's 16 bytes!
+//  The LLVM compiler lays out the structure to preserve the order of its fields,
+//    and also to align the pointer at 8-byte boundary, for access efficiency.
+//  Hence there are 4 unused bytes between the integer and the pointer fields,
+//    and the array of struct item is walked in 16-byte steps.
+
+// In the following code, note how the individual elements of the global array are found, 
+//  and, once each element (a struct item) is found, how its fields are loaded.  
+
+$ lldb struct
+(lldb) target create "struct"
+2016-09-28 17:04:58.837 lldb[2242:114097] Metadata.framework [Error]: couldn't get the client port
+Current executable set to 'struct' (x86_64).
+(lldb) disas -n main
+struct`main:
+struct[0x100000ee0] <+0>:   pushq  %rbp
+struct[0x100000ee1] <+1>:   movq   %rsp, %rbp
+struct[0x100000ee4] <+4>:   subq   $0x20, %rsp     
+struct[0x100000ee8] <+8>:   movl   $0x0, -0x4(%rbp)
+struct[0x100000eef] <+15>:  movl   $0x1, -0x8(%rbp)     // k := 1
+struct[0x100000ef6] <+22>:  cmpl   $0x4, -0x8(%rbp)     // start of the for-loop 
+struct[0x100000efd] <+29>:  jge    0x100000f5a               ; <+122> at struct.c:19
+struct[0x100000f03] <+35>:  leaq   0x88(%rip), %rdi          ; "item %d: %s\n"
+struct[0x100000f0a] <+42>:  leaq   0x10f(%rip), %rax    // this is where the global "it" array starts
+struct[0x100000f11] <+49>:  movl   -0x8(%rbp), %ecx     // load "k"
+struct[0x100000f14] <+52>:  subl   $0x1, %ecx           //  "k-1"
+struct[0x100000f1a] <+58>:  movslq %ecx, %rdx           // sign-extend "k-1" into RDX -- we want to make a pointer (64bit)
+struct[0x100000f1d] <+61>:  shlq   $0x4, %rdx           //   (k-1)*16 
+struct[0x100000f21] <+65>:  movq   %rax, %rsi           // &it[0]
+struct[0x100000f24] <+68>:  addq   %rdx, %rsi           // &it[0] + (k-1)*16 
+struct[0x100000f27] <+71>:  movl   (%rsi), %esi         // load 4 bytes from the above address; it's "num", printf's 2nd arg 
+struct[0x100000f29] <+73>:  movl   -0x8(%rbp), %ecx     // repeat this calculation for "name"
+struct[0x100000f2c] <+76>:  subl   $0x1, %ecx
+struct[0x100000f32] <+82>:  movslq %ecx, %rdx
+struct[0x100000f35] <+85>:  shlq   $0x4, %rdx
+struct[0x100000f39] <+89>:  addq   %rdx, %rax
+struct[0x100000f3c] <+92>:  movq   0x8(%rax), %rdx      // loading "name", an 8-byte pointer value (printf's 3rd arument) 
+struct[0x100000f40] <+96>:  movb   $0x0, %al            //  printf takes an extra argument, as per varargs convention
+struct[0x100000f42] <+98>:  callq  0x100000f66               ; symbol stub for: printf
+struct[0x100000f47] <+103>: movl   %eax, -0x14(%rbp)    // save return value of printf
+struct[0x100000f4a] <+106>: movl   -0x8(%rbp), %eax     // load "k"
+struct[0x100000f4d] <+109>: addl   $0x1, %eax           //  increment "k"
+struct[0x100000f52] <+114>: movl   %eax, -0x8(%rbp)     // store "k" 
+struct[0x100000f55] <+117>: jmp    0x100000ef6               ; <+22> at struct.c:19  // loop back
+struct[0x100000f5a] <+122>: movl   $0x2a, %eax
+struct[0x100000f5f] <+127>: addq   $0x20, %rsp
+struct[0x100000f63] <+131>: popq   %rbp
+struct[0x100000f64] <+132>: retq   
+
+// Now compile this with optimizations and see what changes!
+
+// For parsing binary files that have no padding in their structures,
+//  or of network messages (such as TCP/IP packets), we need structures
+//  of exact size and layout, without padding/alignment optimizations as above.
+// For such cases, compilers support extensions that tell them to "pack"
+//  structs (and the code that accesses them) as tightly as possible.
+
+$ cat struct-packed.c
+#include <stdio.h>
+
+/* Use this simple program to see how struct member accesses 
+   are compiled. */
+
+struct item {
+     int  num;
+     char *name;
+}__attribute__((packed));
+
+struct item it[3] = { {1, "foo"}, {2, "bar"}, {3, "baz"} };
+
+int main()
+{
+     int k;
+
+     for(k = 1; k < 4; k++)
+          printf("item %d: %s\n", it[k-1].num, it[k-1].name);
+
+     return 42;
+}
+
+$ gcc -Wall -o struct-packed struct-packed.c
+
+// Note the changes: struct item is now 12 bytes long (0xc):
+
+$ gobjdump -d struct-packed
+
+struct-packed:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000ed0 <_main>:
+   100000ed0:    55                     push   %rbp
+   100000ed1:    48 89 e5               mov    %rsp,%rbp
+   100000ed4:    48 83 ec 20            sub    $0x20,%rsp
+   100000ed8:    c7 45 fc 00 00 00 00   movl   $0x0,-0x4(%rbp)
+   100000edf:    c7 45 f8 01 00 00 00   movl   $0x1,-0x8(%rbp)
+   100000ee6:    81 7d f8 04 00 00 00   cmpl   $0x4,-0x8(%rbp)
+   100000eed:    0f 8d 5d 00 00 00      jge    100000f50 <_main+0x80>
+   100000ef3:    48 8d 3d 90 00 00 00   lea    0x90(%rip),%rdi        # 100000f8a <_main+0xba>  // "item %d: %s\n"
+   100000efa:    48 8d 05 1f 01 00 00   lea    0x11f(%rip),%rax        # 100001020 <_it>
+   100000f01:    8b 4d f8               mov    -0x8(%rbp),%ecx  // load "k"
+   100000f04:    81 e9 01 00 00 00      sub    $0x1,%ecx
+   100000f0a:    48 63 d1               movslq %ecx,%rdx
+   100000f0d:    48 69 d2 0c 00 00 00   imul   $0xc,%rdx,%rdx   // rdx *= 12
+   100000f14:    48 89 c6               mov    %rax,%rsi      
+   100000f17:    48 01 d6               add    %rdx,%rsi        // &it[0] + (k-1)*12
+   100000f1a:    8b 36                  mov    (%rsi),%esi      // load "num" where 2nd arg to printf must go
+   100000f1c:    8b 4d f8               mov    -0x8(%rbp),%ecx  // same again
+   100000f1f:    81 e9 01 00 00 00      sub    $0x1,%ecx
+   100000f25:    48 63 d1               movslq %ecx,%rdx
+   100000f28:    48 69 d2 0c 00 00 00   imul   $0xc,%rdx,%rdx   
+   100000f2f:    48 01 d0               add    %rdx,%rax
+   100000f32:    48 8b 50 04            mov    0x4(%rax),%rdx  // load "name" where 3rd arg to printf must go
+   100000f36:    b0 00                  mov    $0x0,%al
+   100000f38:    e8 1f 00 00 00         callq  100000f5c <_main+0x8c>  // call printf
+   100000f3d:    89 45 ec               mov    %eax,-0x14(%rbp)
+   100000f40:    8b 45 f8               mov    -0x8(%rbp),%eax
+   100000f43:    05 01 00 00 00         add    $0x1,%eax
+   100000f48:    89 45 f8               mov    %eax,-0x8(%rbp)
+   100000f4b:    e9 96 ff ff ff         jmpq   100000ee6 <_main+0x16>
+   100000f50:    b8 2a 00 00 00         mov    $0x2a,%eax
+   100000f55:    48 83 c4 20            add    $0x20,%rsp
+   100000f59:    5d                     pop    %rbp
+   100000f5a:    c3                     retq   
+
+// Note that in C, &it[0] + 1 will give you the pointer to it[1], i.e., 16/12 bytes off
+//   the start of the array. In C pointer arithmetic, when you add an integer to
+//   a pointer, p + n, you get the address n*(the size of type that p points to) off of p.
+
+// Experiment with a[i], *(a+i), and i[a] for different types of an array a.    
+

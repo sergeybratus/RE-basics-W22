@@ -1,0 +1,23 @@
+
+How to translate between LLDB and GDB: http://lldb.llvm.org/lldb-gdb.html 
+
+E.g.:
+- to disasm a function, in LLDB you say 
+
+    "disas -n func_name"
+
+Ex.:  "disas -n main" or "disas -n puts";
+
+- to view registers, 
+
+    "reg r", 
+
+- to write 4 bytes memory into memory,
+
+    "mem w -s 4 addr value"
+
+Breakpoints and single-instruction stepping work approximately the
+same as in GDB, with the difference that GDB breaks past the function
+preamble, while LLDB breaks before it, and you need to step through
+these to get the right value of the base pointer RBP and stack pointer
+ESP.

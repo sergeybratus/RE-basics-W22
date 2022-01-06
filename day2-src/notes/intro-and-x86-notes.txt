@@ -1,0 +1,119 @@
+
+===============[ Readings ]===============
+
+Please read: 1.3 and 4.1 in the textbook.
+
+Plan to read sec. 1--6 of https://www.cs.cmu.edu/~fp/courses/15213-s07/misc/asm64-handout.pdf 
+by next week; we will be going through this material on Thursday.
+
+===============[ The x86 execution environment ]===============
+
+Before starting on well-defined execution models such as LISP's, we
+take a look at the binary execution environments of the x86
+architecture. 
+
+The Application Binary Interface (ABI) of x86 underlies the design of
+both development toolchains (compilers, linkers, and tools for
+manipulation of libraries and object code; the latter are often called
+"binutils") and the runtime binary chain (OS loaders, dynamic linkers,
+run-time link-editors such as Linux's ld.so and MacOS dyld). You can
+read more about the less-known parts of these toolchains in the
+excellent book by John Levine, "Linkers and Loaders",
+http://www.iecc.com/linker/ (free online).
+
+The definitive source on the x86 architecture is Intel manuals:
+http://www.intel.com/content/www/us/en/processors/architectures-software-developer-manuals.html
+Most of the time, simply googling for an instruction will get you enough
+information to continue reading the code, though.
+
+There are plenty of smaller online tutorials on both 32-bit and 64-bit x86.
+My favorites are:
+for 32 bits: http://www.cs.dartmouth.edu/~sergey/cs108/tiny-guide-to-x86-assembly.pdf
+for 64 bits: https://www.cs.cmu.edu/~fp/courses/15213-s07/misc/asm64-handout.pdf 
+
+In particular, refer to fig.2 on p.7 for a summary of x86_64 registers
+and their uses in asm64-handout.pdf. 
+
+The 64-bit ABI (for the platforms known as amd64 or x86_64; please
+note that ia64, the Itanium, is a completely different platform!) is
+described in http://www.x86-64.org/documentation/abi.pdf It includes
+recommended calling conventions for functions (sec. 3.2.3, esp.  page
+20) for all kinds of arguments, register usage (fig. 3.4), virtual
+address space layout, compiling global variables and functions
+(3.5.4--5,7), binary file formats (sec. 4), implementation of
+libraries (sec. 6), and so on.
+
+---------------[[ Understanding compiled x86 code ]]---------------
+
+Compilers are very much at liberty to compile your code every which way
+they like. For example, code compiled with and without optimizations
+can look completely different. Still, there are some basic conventions
+that they need to stick to as per the ABI; otherwise, for example,
+separately compiled libraries would not be possible. 
+
+ABI conventions and internal compiler structure make it possible to
+read the binary compiled code with little difficulty, once you get
+used to it.  (This is not necessarily true for all computing models;
+for example, the internal workings of a neural network or a Hidden
+Markov Model trained for a particular task may be virtually impossible
+to understand, even though the task itself may be very simple).
+
+We will practice understanding x86 binary code this week. 
+Examples are posted in x86/ subdirectory. 
+
+Make sure you understand these examples! 
+
+The best way to understand them is to change the code around a little
+bit, recompile, and observe the results. 
+
+Suggestion: switch between int, long, char and the unsigned int,
+unsigned int, and unsigned char in a simple program that does 
+addition/subtraction and a comparison on a number, and observe
+the changes in generated code!
+
+Another useful way is to step through compiled code in a debugger that
+supports single instruction execution ('si' in GDB) and observe the
+effects on the registers ('i r' in GDB) and memory ('x/. mem_address'
+in GDB, where . is a format letter specifying how to render the
+contents of memory starting at mem_address and how much of it to
+display, e.g. 'x/x' for hex, 'x/c' for char values, 'x/s' for
+null-terminated strings, etc.)
+
+See my commented transcripts in x86/ 
+
+===============[ Tools on Linux ]===============
+
+I prefer the Debian-based varieties of Linux and will be using 
+_apt-get_ for package management. This is the path of most freedom
+and least hassle. 
+
+===============[ Tools on Mac OS X ]===============
+
+I use the Macports system on Yosemite, https://www.macports.org/ 
+The Homebrew package management system is an alternative; I _may_
+be able to support it if enough of you have a strong preference for it.
+
+In order to use Macports, you will need to install Apple's Xcode
+and the Xcode command line tools. These are huge downloads, and require
+various Apple accounts, but seem to be the best value-for-time tradeoff.
+
+Follow https://www.macports.org/install.php and then 
+"port selfupdate", "port install binutils". 
+
+I am used to GDB. To get GDB working:
+  http://ntraft.com/installing-gdb-on-os-x-mavericks/
+(On Yosemite, you will get additional dialogs with many extra fields 
+  when creating a code signing certificate. I left them blank.)
+ 
+MacOS X uses the Mach-O binary file format (unlike Linux and other
+Unix systems, which use ELF). Apple provides the _otool_ to dissect
+Mach-O; gobjdump also works for most tasks. For a quick intro
+to Mach-O and binary executable loading, see slides 1--15 of
+https://www.blackhat.com/presentations/bh-dc-09/Iozzo/BlackHat-DC-09-Iozzo-Macho-on-the-fly.pdf
+
+
+
+
+ 
+
+ 
