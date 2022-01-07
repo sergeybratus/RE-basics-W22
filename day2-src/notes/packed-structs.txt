@@ -1,0 +1,294 @@
+
+When the compiler lays out C structs, it may pad their fields
+for alignment expected to produce better performance.
+
+We see that with struct.c. The struct item has an int and a pointer,
+so it needs 12 bytes for both. However, it is created by default
+as a 16-byte structure:
+
+$ otool -s __DATA __data struct 
+struct:
+Contents of (__DATA,__data) section
+0000000100001020	01 00 00 00 00 00 00 00 72 0f 00 00 01 00 00 00 
+                           int      ^^^^^^^^^^^    char *
+0000000100001030	02 00 00 00 00 00 00 00 76 0f 00 00 01 00 00 00 
+                                    ^^^^^^^^^^^ 
+0000000100001040	03 00 00 00 00 00 00 00 7a 0f 00 00 01 00 00 00 
+                                    ^^^^^^^^^^^
+                                      padding
+
+And the strings (observe their addresses above, in little-ending order):
+
+$ otool -s __TEXT __cstring struct 
+struct:
+Contents of (__TEXT,__cstring) section
+0000000100000f72	66 6f 6f 00 62 61 72 00 62 61 7a 00 69 74 65 6d 
+                        ^^^^^^^^^^^ ^^^^^^^^^^^ ^^^^^^^^^^^
+                          foo\0       bar\0       baz\0
+0000000100000f82	20 25 64 3a 20 25 73 0a 00 69 74 65 6d 20 25 64 
+0000000100000f92	20 61 67 61 69 6e 3a 20 25 73 0a 00 
+
+This can also be see in how it's compiled:
+
+$ gcc -S struct.c
+$ grep -v cfi struct.s > struct1.s
+$ cat struct1.s
+
+	.section	__TEXT,__text,regular,pure_instructions
+	.macosx_version_min 10, 10
+	.globl	_main
+	.align	4, 0x90
+_main:                                  ## @main
+## BB#0:
+	pushq	%rbp
+Ltmp0:
+Ltmp1:
+	movq	%rsp, %rbp
+Ltmp2:
+	subq	$32, %rsp
+	movl	$0, -4(%rbp)    
+	movl	$1, -8(%rbp)   // <-- this is "k"  
+LBB0_1:                                 ## =>This Inner Loop Header: Depth=1
+	cmpl	$4, -8(%rbp)     // <-- loop start, compare "k" with 4
+	jge	LBB0_4          
+## BB#2:                                ##   in Loop: Header=BB0_1 Depth=1
+	leaq	L_.str3(%rip), %rdi
+	leaq	_it(%rip), %rax  // <-- load the address of the array's start
+	movl	-8(%rbp), %ecx   // <-- load "k"
+	subl	$1, %ecx         // <-- subtract 1
+	movslq	%ecx, %rdx       // <-- sign-extend from a 32-bit to a 64-bit value---we want to deal with 64-bit pointer
+	shlq	$4, %rdx         // <-- shift left by 4 bits == multiply by 16, the size of one struct item 
+	movq	%rax, %rsi        
+	addq	%rdx, %rsi       // <-- it + (k-1)*sizeof(struct item), the address of the current item it[k-1]
+	movl	(%rsi), %esi     // <-- load the 4 byte integer off of the address above. This it it[k-1].num  
+
+        movl	-8(%rbp), %ecx   // <-- load "k"
+	subl	$1, %ecx         // <-- subtract 1 
+	movslq	%ecx, %rdx       // <-- sign-extend from a 32-bit to a 64-bit value
+	shlq	$4, %rdx         // <-- shift left by 4 bits == multiply by 16, the size of one struct item
+	addq	%rdx, %rax       // <-- got the address of the current item
+	movq	8(%rax), %rdx    // <-- load the "name" char* of the item, from offset 8 in the item. This is it[k-1].name
+	movb	$0, %al          // <-- this is an ABI optimization for a VARARGS call such as printf(), see AMD64 abi.pdf, sec 3.5.7,  p.50
+	callq	_printf
+	movl	%eax, -20(%rbp)         ## 4-byte Spill
+## BB#3:                                ##   in Loop: Header=BB0_1 Depth=1
+	movl	-8(%rbp), %eax   // <-- fetch, increment, and store "k"
+	addl	$1, %eax         //      ..
+	movl	%eax, -8(%rbp)   //      ..
+	jmp	LBB0_1           // <-- loop back to top
+LBB0_4:
+	leaq	_it(%rip), %rax
+	movq	%rax, -16(%rbp)
+	movl	$1, -8(%rbp)
+LBB0_5:                                 ## =>This Inner Loop Header: Depth=1
+	cmpl	$4, -8(%rbp)
+	jge	LBB0_8
+## BB#6:                                ##   in Loop: Header=BB0_5 Depth=1
+	leaq	L_.str4(%rip), %rdi
+	movq	-16(%rbp), %rax
+	movl	(%rax), %esi
+	movq	-16(%rbp), %rax
+	movq	8(%rax), %rdx
+	movb	$0, %al
+	callq	_printf
+	movq	-16(%rbp), %rdx
+	addq	$16, %rdx
+	movq	%rdx, -16(%rbp)
+	movl	%eax, -24(%rbp)         ## 4-byte Spill
+## BB#7:                                ##   in Loop: Header=BB0_5 Depth=1
+	movl	-8(%rbp), %eax
+	addl	$1, %eax
+	movl	%eax, -8(%rbp)
+	jmp	LBB0_5
+LBB0_8:
+	movl	$1, %eax
+	addq	$32, %rsp
+	popq	%rbp
+	retq
+
+	.section	__TEXT,__cstring,cstring_literals
+L_.str:                                 ## @.str
+	.asciz	"foo"
+
+L_.str1:                                ## @.str1
+	.asciz	"bar"
+
+L_.str2:                                ## @.str2
+	.asciz	"baz"
+
+	.section	__DATA,__data
+	.globl	_it                     ## @it
+	.align	4
+_it:
+	.long	1                       ## 0x1   // <-- num, 4 bytes
+	.space	4                                // <-- padding, 4 bytes
+	.quad	L_.str                           // <-- name, 8-byte address 
+	.long	2                       ## 0x2
+	.space	4
+	.quad	L_.str1
+	.long	3                       ## 0x3
+	.space	4
+	.quad	L_.str2
+
+	.section	__TEXT,__cstring,cstring_literals
+L_.str3:                                ## @.str3
+	.asciz	"item %d: %s\n"
+
+L_.str4:                                ## @.str4
+	.asciz	"item %d again: %s\n"
+
+However, when dealing with data sent by devices or over the wire in
+a particular specified layout format specified format, such padding is unwanted.
+For example, TCP/IP packets come with headers that are exactly laid-out
+byte by byte, and cannot take any padding.
+(E.g., http://www.markhneedham.com/blog/wp-content/uploads/2012/07/IP-Header.jpeg,
+       http://i.stack.imgur.com/cAtkx.jpg ) 
+
+There's a special attribute for specifying to the compiler that you
+mean this exact layout: __attribute__((packed)) . This attribute
+is what they call a compiler extension; these extensions are
+not a part of the C standard, but are essential for compiling
+core systems libraries and operating system kernels.
+More about GCC extensions: https://gcc.gnu.org/onlinedocs/gcc/C-Extensions.html
+
+$ cat structp.c
+#include <stdio.h>
+
+/* Use this simple program to see how struct member accesses 
+   are compiled. */
+
+struct item {
+     int  num;
+     char *name;
+} __attribute__((packed));  // <----
+
+<skipped the rest; it's identical to structp.c>
+
+Now we get a shorter data section:
+
+$ otool -s __DATA __data structp
+structp:
+Contents of (__DATA,__data) section
+0000000100001020	01 00 00 00 6a 0f 00 00 01 00 00 00 02 00 00 00 
+                        ^^^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^
+                           int            char *              int 
+0000000100001030	6e 0f 00 00 01 00 00 00 03 00 00 00 72 0f 00 00 
+                        ^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^
+                             char *                int 
+0000000100001040	01 00 00 00 
+
+
+Observe the changes in code:
+
+$ gcc -S structp.c
+$ grep -v cfi structp.s > structp1.s
+$ cat structp1.s 
+	.section	__TEXT,__text,regular,pure_instructions
+	.macosx_version_min 10, 10
+	.globl	_main
+	.align	4, 0x90
+_main:                                  ## @main
+## BB#0:
+	pushq	%rbp
+Ltmp0:
+Ltmp1:
+	movq	%rsp, %rbp
+Ltmp2:
+	subq	$32, %rsp
+	movl	$0, -4(%rbp)
+	movl	$1, -8(%rbp)
+LBB0_1:                                 ## =>This Inner Loop Header: Depth=1
+	cmpl	$4, -8(%rbp)
+	jge	LBB0_4
+## BB#2:                                ##   in Loop: Header=BB0_1 Depth=1
+	leaq	L_.str3(%rip), %rdi
+	leaq	_it(%rip), %rax
+	movl	-8(%rbp), %ecx
+	subl	$1, %ecx
+	movslq	%ecx, %rdx
+	imulq	 $12, %rdx    // <--- multiplying the index "(k-1)" by 12, the size of struct item
+	movq	%rax, %rsi
+	addq	%rdx, %rsi
+	movl	(%rsi), %esi
+	movl	-8(%rbp), %ecx
+	subl	$1, %ecx
+	movslq	%ecx, %rdx
+	imulq	 $12, %rdx   // <--- multiplying the index "(k-1)" by 12, the size of struct item
+	addq	%rdx, %rax
+	movq	4(%rax), %rdx
+	movb	$0, %al
+	callq	_printf
+	movl	%eax, -20(%rbp)         ## 4-byte Spill
+## BB#3:                                ##   in Loop: Header=BB0_1 Depth=1
+	movl	-8(%rbp), %eax
+	addl	$1, %eax
+	movl	%eax, -8(%rbp)
+	jmp	LBB0_1
+LBB0_4:
+	leaq	_it(%rip), %rax
+	movq	%rax, -16(%rbp)
+	movl	$1, -8(%rbp)
+LBB0_5:                                 ## =>This Inner Loop Header: Depth=1
+	cmpl	$4, -8(%rbp)
+	jge	LBB0_8
+## BB#6:                                ##   in Loop: Header=BB0_5 Depth=1
+	leaq	L_.str4(%rip), %rdi
+	movq	-16(%rbp), %rax
+	movl	(%rax), %esi
+	movq	-16(%rbp), %rax
+	movq	4(%rax), %rdx
+	movb	$0, %al
+	callq	_printf
+	movq	-16(%rbp), %rdx
+	addq	$12, %rdx
+	movq	%rdx, -16(%rbp)
+	movl	%eax, -24(%rbp)         ## 4-byte Spill
+## BB#7:                                ##   in Loop: Header=BB0_5 Depth=1
+	movl	-8(%rbp), %eax
+	addl	$1, %eax
+	movl	%eax, -8(%rbp)
+	jmp	LBB0_5
+LBB0_8:
+	movl	$1, %eax
+	addq	$32, %rsp
+	popq	%rbp
+	retq
+
+	.section	__TEXT,__cstring,cstring_literals
+L_.str:                                 ## @.str
+	.asciz	"foo"
+
+L_.str1:                                ## @.str1
+	.asciz	"bar"
+
+L_.str2:                                ## @.str2
+	.asciz	"baz"
+
+	.section	__DATA,__data
+	.globl	_it                     ## @it
+	.align	4
+_it:
+	.long	1                       ## 0x1  // <-- item array elements, num and name now back-to-back
+	.quad	L_.str
+	.long	2                       ## 0x2
+	.quad	L_.str1
+	.long	3                       ## 0x3
+	.quad	L_.str2
+
+	.section	__TEXT,__cstring,cstring_literals
+L_.str3:                                ## @.str3
+	.asciz	"item %d: %s\n"
+
+L_.str4:                                ## @.str4
+	.asciz	"item %d again: %s\n"
+
+This facility is critical for a C compiler, since it's critical for
+writing systems code.  Languages that aim to simply interaction with
+the OS---such as Perl, Python, and Ruby---include comparable facilities: Perl's
+_pack_ and _unpack_ functions
+(http://perldoc.perl.org/functions/pack.html), Python's _struct_
+module (https://docs.python.org/2/library/struct.html), and Ruby's
+http://www.rubydoc.info/stdlib/core/String:unpack and
+http://www.rubydoc.info/stdlib/core/Array:pack (cf.:
+http://blog.bigbinary.com/2011/07/20/ruby-pack-unpack.html)
+

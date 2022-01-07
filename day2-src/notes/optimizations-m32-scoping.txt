@@ -1,0 +1,347 @@
+
+// Compilers take considerable liberties with your code, so long as the ABI conventions
+//  are observed. The code generated at each level of optimization may bear little
+//  resemblance to code from other levels.  
+
+$ cat hello.c
+#include <stdio.h>
+
+int main()
+{
+     int i = 10;
+     
+     while( i >= 0 ){
+          puts( "Hello" );
+          i = i - 1;
+     }
+
+     return 0;
+}
+
+// Level 1:
+
+$ gcc -O1 -o hello hello.c
+
+$ gobjdump -d hello
+
+hello:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f40 <_main>:
+   100000f40:	55                   	push   %rbp
+   100000f41:	48 89 e5             	mov    %rsp,%rbp
+   100000f44:	41 56                	push   %r14       // <-- R14 is a "callee-saved" register. If used by a function, 
+                                                          //      it must be saved on entry, restored on exit.
+   100000f46:	53                   	push   %rbx       // <-- RBX is also callee-saved (see amd64 ABI docs).
+   100000f47:	bb 0b 00 00 00       	mov    $0xb,%ebx  // <-- 10 becomes 11 (==0xb), to simplify comparison logic.
+                                                          //       This variable is now kept only in the register; no need for a stack slot for it
+   100000f4c:	4c 8d 35 43 00 00 00 	lea    0x43(%rip),%r14        # 100000f96 <_puts$stub+0x20> // <-- where "Hello" lives
+   100000f53:	66 66 66 66 2e 0f 1f 	data32 data32 data32 nopw %cs:0x0(%rax,%rax,1) // <-- a 13-byte NOP. Cf. http://stackoverflow.com/questions/29871947/what-is-the-meaning-of-the-data32-data32-nopw-cs0x0rax-rax-1-instruction-i
+   100000f5a:	84 00 00 00 00 00 
+   100000f60:	4c 89 f7             	mov    %r14,%rdi  // <-- No surprise here, this is the sole argument to puts
+   100000f63:	e8 0e 00 00 00       	callq  100000f76 <_puts$stub>
+   100000f68:	ff cb                	dec    %ebx       // <-- decrement "i" by one
+   100000f6a:	85 db                	test   %ebx,%ebx  // <-- test the result against 0
+   100000f6c:	7f f2                	jg     100000f60 <_main+0x20>  // <-- if 'g'reater than 0, jump backwards to create the loop
+   100000f6e:	31 c0                	xor    %eax,%eax  // <-- make 0 to return
+   100000f70:	5b                   	pop    %rbx       // <-- restore callee-saved registers
+   100000f71:	41 5e                	pop    %r14       // <--  ditto  
+   100000f73:	5d                   	pop    %rbp       // <-- standard post-amble
+   100000f74:	c3                   	retq   
+
+Disassembly of section __TEXT.__stubs:
+
+0000000100000f76 <_puts$stub>:
+   100000f76:	ff 25 94 00 00 00    	jmpq   *0x94(%rip)        # 100001010 <_puts$stub>
+
+// Skipped further disassembly.
+
+// Level 2:
+//   Since the loop was statically analyzable, it was unrolled into an equivalent count of its body's repetitions,   
+//    as per the loop-unrolling optimization technique. 
+//
+// Observe how this binary code is hard to relate to either -O1 or the non-optimized compiler output! 
+
+$ gcc -O2 -o hello hello.cPobjdump -d hello
+
+hello:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f00 <_main>:
+   100000f00:	55                   	push   %rbp
+   100000f01:	48 89 e5             	mov    %rsp,%rbp
+   100000f04:	53                   	push   %rbx
+   100000f05:	50                   	push   %rax
+   100000f06:	48 8d 1d 81 00 00 00 	lea    0x81(%rip),%rbx        # 100000f8e <_puts$stub+0x20>
+   100000f0d:	48 89 df             	mov    %rbx,%rdi
+   100000f10:	e8 59 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f15:	48 89 df             	mov    %rbx,%rdi
+   100000f18:	e8 51 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f1d:	48 89 df             	mov    %rbx,%rdi
+   100000f20:	e8 49 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f25:	48 89 df             	mov    %rbx,%rdi
+   100000f28:	e8 41 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f2d:	48 89 df             	mov    %rbx,%rdi
+   100000f30:	e8 39 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f35:	48 89 df             	mov    %rbx,%rdi
+   100000f38:	e8 31 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f3d:	48 89 df             	mov    %rbx,%rdi
+   100000f40:	e8 29 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f45:	48 89 df             	mov    %rbx,%rdi
+   100000f48:	e8 21 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f4d:	48 89 df             	mov    %rbx,%rdi
+   100000f50:	e8 19 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f55:	48 89 df             	mov    %rbx,%rdi
+   100000f58:	e8 11 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f5d:	48 89 df             	mov    %rbx,%rdi
+   100000f60:	e8 09 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f65:	31 c0                	xor    %eax,%eax
+   100000f67:	48 83 c4 08          	add    $0x8,%rsp
+   100000f6b:	5b                   	pop    %rbx
+   100000f6c:	5d                   	pop    %rbp
+   100000f6d:	c3                   	retq   
+
+Disassembly of section __TEXT.__stubs:
+
+0000000100000f6e <_puts$stub>:
+   100000f6e:	ff 25 9c 00 00 00    	jmpq   *0x9c(%rip)        # 100001010 <_puts$stub>
+
+// skipped.
+
+// Now let's compile the same code for the 32-bit memory model:
+
+$ gcc -m32 -o hello hello.c
+$ gobjdump -d hello
+
+hello:     file format mach-o-i386
+
+
+Disassembly of section .text:
+
+00001f40 <_main>:
+    1f40:	55                   	push   %ebp          // <-- the standard preamble now deals with 32-bit addresses, 
+    1f41:	89 e5                	mov    %esp,%ebp     //      but otherwise stays the same
+    1f43:	83 ec 18             	sub    $0x18,%esp   
+    1f46:	e8 00 00 00 00       	call   1f4b <_main+0xb>  //  <-- A call to the "function" starting at the next instruction?
+    1f4b:	58                   	pop    %eax              //  <-- The above call pushes this instruction's address on the stack. 
+                                                                 //       This pop picks that address up from the stack into EAX & restores the stack.
+                                                                 //       By this point, there's no other CPU state to evidence this call was ever made,
+                                                                 //         because a call is just a push-and-jump. But now EAX has the address of where 
+                                                                 //         main() was loaded. It will be used to reference global data. 
+    1f4c:	c7 45 fc 00 00 00 00 	movl   $0x0,-0x4(%ebp)
+    1f53:	c7 45 f8 0a 00 00 00 	movl   $0xa,-0x8(%ebp)
+    1f5a:	89 45 f4             	mov    %eax,-0xc(%ebp)   // <-- Saving the function-anchored global address we got in EAX
+    1f5d:	81 7d f8 00 00 00 00 	cmpl   $0x0,-0x8(%ebp)   // <-- Start of the loop
+    1f64:	0f 8c 25 00 00 00    	jl     1f8f <_main+0x4f> // <-- skip to return if it's time to exit this loop
+    1f6a:	8b 45 f4             	mov    -0xc(%ebp),%eax   // <-- restoring EAX (even though it hasn't been overwritten; but we aren't optimizing yet)
+    1f6d:	8d 88 67 00 00 00    	lea    0x67(%eax),%ecx   // <-- getting the relative offset of "Hello" from the main()'s entry point
+    1f73:	89 0c 24             	mov    %ecx,(%esp)       // <-- ..and placing it on the stack, as per the 32-bit calling convention 
+                                                                 //       (in which function arguments are passed on the stack, unlike amd64's convention, 
+                                                                 //        where arguments are passed in registers)
+    1f76:	e8 1b 00 00 00       	call   1f96 <_puts$stub>
+    1f7b:	8b 4d f8             	mov    -0x8(%ebp),%ecx   // <-- "i" getting loaded,  
+    1f7e:	81 e9 01 00 00 00    	sub    $0x1,%ecx         //    ...  decremented
+    1f84:	89 4d f8             	mov    %ecx,-0x8(%ebp)   //    ...  and saved back onto the stack
+    1f87:	89 45 f0             	mov    %eax,-0x10(%ebp)  // <-- Saving the return value of puts(), just in case
+    1f8a:	e9 ce ff ff ff       	jmp    1f5d <_main+0x1d> // <-- completing the loop
+    1f8f:	31 c0                	xor    %eax,%eax         // <-- Path to exit, returning 0. 
+    1f91:	83 c4 18             	add    $0x18,%esp        // <-- Cleaning up the stack; after this ESP is above the function's local storage area
+    1f94:	5d                   	pop    %ebp
+    1f95:	c3                   	ret    
+
+Disassembly of section .symbol_stub:
+
+// Same dynamic linking mechanism as for 64-bits:
+
+00001f96 <_puts$stub>:
+    1f96:	ff 25 08 20 00 00    	jmp    *0x2008
+
+Disassembly of section __TEXT.__stub_helper:
+
+// skipped.
+
+// 
+//  ===========================[ Global variables ]===========================
+// 
+
+$ cat hellos.c
+
+#include <stdio.h>
+
+int i = 10;   // <-- Now "i" is global
+
+int main()
+{
+     while( i >= 0 ){
+          puts( "Hello" );
+          i--;
+     }
+
+     return 0;
+}
+
+$ gcc -Wall -o hellos hellos.c
+
+$ gobjdump -d hellos
+
+hellos:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000f20 <_main>:
+   100000f20:	55                   	push   %rbp
+   100000f21:	48 89 e5             	mov    %rsp,%rbp
+   100000f24:	48 83 ec 10          	sub    $0x10,%rsp
+   100000f28:	c7 45 fc 00 00 00 00 	movl   $0x0,-0x4(%rbp)
+   100000f2f:	81 3d df 00 00 00 00 	cmpl   $0x0,0xdf(%rip)        # 100001018 <_i>  // <-- "i" is addressed off of RIP, not stack-based RBP/EBP
+   100000f36:	00 00 00 
+   100000f39:	0f 8c 26 00 00 00    	jl     100000f65 <_main+0x45>
+   100000f3f:	48 8d 3d 48 00 00 00 	lea    0x48(%rip),%rdi        # 100000f8e <_puts$stub+0x20> // <-- Address of "Hello", as before
+   100000f46:	e8 23 00 00 00       	callq  100000f6e <_puts$stub>
+   100000f4b:	8b 0d c7 00 00 00    	mov    0xc7(%rip),%ecx        # 100001018 <_i>  // <-- RIP-relative addressing is different for every instruction
+   100000f51:	81 c1 ff ff ff ff    	add    $0xffffffff,%ecx                         // <-- Adding a 4-byte representation of -1, in "2's complement" form
+   100000f57:	89 0d bb 00 00 00    	mov    %ecx,0xbb(%rip)        # 100001018 <_i>  // <-- Saving back to RAM/cache, RIP-relative offset adjusted again 
+   100000f5d:	89 45 f8             	mov    %eax,-0x8(%rbp)
+   100000f60:	e9 ca ff ff ff       	jmpq   100000f2f <_main+0xf>  // <-- Completing the loop
+   100000f65:	31 c0                	xor    %eax,%eax
+   100000f67:	48 83 c4 10          	add    $0x10,%rsp
+   100000f6b:	5d                   	pop    %rbp
+   100000f6c:	c3                   	retq   
+
+Disassembly of section __TEXT.__stubs:
+
+0000000100000f6e <_puts$stub>:
+   100000f6e:	ff 25 9c 00 00 00    	jmpq   *0x9c(%rip)        # 100001010 <_puts$stub>
+
+// Skipped the rest of disassembly.
+
+//
+// ===========================[ Recursion ]===========================
+//
+
+$ cat fact.c
+#include <stdio.h>
+
+/* a very naive recursive factoriac */
+unsigned int fact(unsigned int n)
+{
+     if( n == 0 )
+          return 1;
+     if( 1 == n )
+          return 1;
+     return n * fact(n-1);
+}
+
+int main()
+{
+     int i;
+     for( i = 0; i < 10; i++ ){ 
+          printf("%d\n", fact(i));
+     }
+
+     return 0;
+}
+
+// It works:
+
+$ ./fact
+1
+1
+2
+6
+24
+120
+720
+5040
+40320
+362880
+
+
+// Read through this disassembly to see how compiling recursive functions works.
+//   Note that the same code of fact() works with multiple representations of
+//   this function's arguments and internal variables (such as "n-1"). 
+// 
+/  The invention of the stack was a major advance in representing a repeatable, 
+//   self-similar computation, in which intermediary state could be saved away 
+//   and then returned to. Keep in mind, though, that this is only a partial case
+//   of a computation that depends on some environment created by previous 
+//   computations and dependent on their results. Modern functional languages
+//   provide richer models of such computations.
+
+$ gobjdump -d fact
+
+fact:     file format mach-o-x86-64
+
+
+Disassembly of section .text:
+
+0000000100000eb0 <_fact>:
+   100000eb0:	55                   	push   %rbp
+   100000eb1:	48 89 e5             	mov    %rsp,%rbp
+   100000eb4:	48 83 ec 10          	sub    $0x10,%rsp
+   100000eb8:	31 c0                	xor    %eax,%eax
+   100000eba:	89 7d f8             	mov    %edi,-0x8(%rbp)
+   100000ebd:	3b 45 f8             	cmp    -0x8(%rbp),%eax
+   100000ec0:	0f 85 0c 00 00 00    	jne    100000ed2 <_fact+0x22>
+   100000ec6:	c7 45 fc 01 00 00 00 	movl   $0x1,-0x4(%rbp)
+   100000ecd:	e9 39 00 00 00       	jmpq   100000f0b <_fact+0x5b>
+   100000ed2:	b8 01 00 00 00       	mov    $0x1,%eax
+   100000ed7:	3b 45 f8             	cmp    -0x8(%rbp),%eax
+   100000eda:	0f 85 0c 00 00 00    	jne    100000eec <_fact+0x3c>
+   100000ee0:	c7 45 fc 01 00 00 00 	movl   $0x1,-0x4(%rbp)
+   100000ee7:	e9 1f 00 00 00       	jmpq   100000f0b <_fact+0x5b>
+   100000eec:	8b 45 f8             	mov    -0x8(%rbp),%eax
+   100000eef:	8b 4d f8             	mov    -0x8(%rbp),%ecx
+   100000ef2:	81 e9 01 00 00 00    	sub    $0x1,%ecx
+   100000ef8:	89 cf                	mov    %ecx,%edi
+   100000efa:	89 45 f4             	mov    %eax,-0xc(%rbp)
+   100000efd:	e8 ae ff ff ff       	callq  100000eb0 <_fact>
+   100000f02:	8b 4d f4             	mov    -0xc(%rbp),%ecx
+   100000f05:	0f af c8             	imul   %eax,%ecx
+   100000f08:	89 4d fc             	mov    %ecx,-0x4(%rbp)
+   100000f0b:	8b 45 fc             	mov    -0x4(%rbp),%eax
+   100000f0e:	48 83 c4 10          	add    $0x10,%rsp
+   100000f12:	5d                   	pop    %rbp
+   100000f13:	c3                   	retq   
+   100000f14:	66 66 66 2e 0f 1f 84 	data32 data32 nopw %cs:0x0(%rax,%rax,1)
+   100000f1b:	00 00 00 00 00 
+
+0000000100000f20 <_main>:
+   100000f20:	55                   	push   %rbp
+   100000f21:	48 89 e5             	mov    %rsp,%rbp
+   100000f24:	48 83 ec 10          	sub    $0x10,%rsp
+   100000f28:	c7 45 fc 00 00 00 00 	movl   $0x0,-0x4(%rbp)
+   100000f2f:	c7 45 f8 00 00 00 00 	movl   $0x0,-0x8(%rbp)
+   100000f36:	81 7d f8 0a 00 00 00 	cmpl   $0xa,-0x8(%rbp)
+   100000f3d:	0f 8d 2b 00 00 00    	jge    100000f6e <_main+0x4e>
+   100000f43:	8b 7d f8             	mov    -0x8(%rbp),%edi
+   100000f46:	e8 65 ff ff ff       	callq  100000eb0 <_fact>
+   100000f4b:	48 8d 3d 44 00 00 00 	lea    0x44(%rip),%rdi        # 100000f96 <_printf$stub+0x20>
+   100000f52:	89 c6                	mov    %eax,%esi
+   100000f54:	b0 00                	mov    $0x0,%al
+   100000f56:	e8 1b 00 00 00       	callq  100000f76 <_printf$stub>
+   100000f5b:	89 45 f4             	mov    %eax,-0xc(%rbp)
+   100000f5e:	8b 45 f8             	mov    -0x8(%rbp),%eax
+   100000f61:	05 01 00 00 00       	add    $0x1,%eax
+   100000f66:	89 45 f8             	mov    %eax,-0x8(%rbp)
+   100000f69:	e9 c8 ff ff ff       	jmpq   100000f36 <_main+0x16>
+   100000f6e:	31 c0                	xor    %eax,%eax
+   100000f70:	48 83 c4 10          	add    $0x10,%rsp
+   100000f74:	5d                   	pop    %rbp
+   100000f75:	c3                   	retq   
+
+Disassembly of section __TEXT.__stubs:
+
+0000000100000f76 <_printf$stub>:
+   100000f76:	ff 25 94 00 00 00    	jmpq   *0x94(%rip)        # 100001010 <_printf$stub>
+
+// Skipped.
+
+// Read through this example, and acquire an understanding how the naive recursive factorial 
+//   gets its values!
+

@@ -1,0 +1,84 @@
+
+Use the following exercises to familiarize yourself with how various
+constructs are compiled in C. Pay special attention to how various
+variables are accessed.
+
+-------------[ Scoping in C ]-------------
+
+In C, generally speaking, variables are either local to a function 
+(and should not be accessed outside of it---the compiler will
+try to catch such accesses and error out) or global. Consequently,
+accesses to them are compiled differently: 
+
+  - for local variables, stored on the stack and accessed through 
+    the frame pointer (RBP/EBP) or the stack pointer (RSP/ESP);
+
+  - for global variables, stored in a separate data section loaded
+    from the executable and accessed via either a global address
+    or off of the instruction pointer (RIP/EIP). 
+
+On top of this, a small, short-lived variable such as an loop counter
+int or a pointer can be stored in a register and never touch RAM,
+especially in optimized code (the so-called 'register' storage
+class). Also note that C allows you to designate a variable as
+'static'; this means different things for global and local variables
+(the 'file scoping' vs 'static storage class', respectively; cf.
+http://stackoverflow.com/questions/572547/what-does-static-mean-in-a-c-program). 
+
+These two kinds of scoping---either local or global, with almost
+nothing in-between---correspond to how accesses are compiled:
+either tied to a _unique_ address (including a RIP value of an
+instruction), or to a _per-invocation_ address, via an indirection.
+
+The latter mode of access is what makes _recursion_ possible. It's
+important to understand this; without indirection of variable access, 
+the stack would just be a way of managing control flow. In fact, 
+some C implementations use _two_ stacks: one to save return addresses,
+and another, separate stack for variables, thus decoupling variable 
+storage and control. 
+
+This is by far not the most general way that scoping and addressing
+can be. We'll see that _closures_ and _continuations_ of functional
+languages (where functions can be made on the fly and passed around as
+"first-class" values---and this is indeed the preferred way of
+structuring programs) generalize scoping and respective compilation
+considerably.
+
+-------------[ Exercises ]-------------
+
+Observe what changes when you compile the code without optimizations,
+at -O1, and at -O2. Also observe what happens when you compile it for
+the 32-bit model (-m32) and/or without the use of the frame pointer
+(-fomit-frame-pointer).  By default, on a 64-bit system, your code is
+compiled with -m64 and with the use of the frame pointer (unless you
+use a GCC version between 4.6 and 5.1---check with "gcc --version").
+
+1. Observe the passing of arguments to a function. Start with 
+   a simple function that takes none (ex/func.c) or one (ex/funcn.c),
+   and add more. Observe how the arguments are passed as per 
+   the ABI for the 64-bit model (arguments passed in registers) and the 32-bit 
+   model (arguments passed on stack).
+
+2. Observe how C compiles pointer operations (start with ex/ptr.c). 
+   Check the differences between local and global variables. 
+
+3. Observe how C compiles accesses to struct members (ex/struct.c).
+   Observe how static strings are handled. Observe how an array
+   of structs is stored in memory. 
+
+   Note: on MacOSX, "otool -d struct" will print the data section, where
+         initialized global variables are stored; same with 
+         "gobjdump -j .data -s struct". On Linux, "objdump -j .data -s struct"
+         would do the same (-j chooses the section by name, 
+         -s displays its content in hex; -x will list sections).
+
+   In GDB (or other byte-level debugger), change the values of the
+   the struct members in RAM while the program is stopped at a breakpoint.
+   
+4. Draw the stack outlines for the ex/fib.c program that (naively)
+   computes Fibonacci numbers. Observe how newer stack frames
+   overwrite older stack frames---but also that the contents of a
+   stack frame will linger after the function exits (until
+   overwritten).
+
+

