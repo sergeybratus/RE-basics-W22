@@ -8,7 +8,7 @@ Resources and links
 
 ==================[ Item 1: Dynamic linking mystery ]==========
 
-See <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/why-no-lazy-linking.txt">
+See <https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/why-no-lazy-linking.txt>
 
 ==================[ Item 2: History of memory corruption exploits ]========================
 

@@ -25,9 +25,9 @@ Although the focus and pre-requisites of the course will not change, week-by-wee
 
 <hr>
 
-<p><a href="https://sergeybratus.github.io/RE-basics-W22/day2-slides.pdf">Day 1 slides</a>
+<p><a href="https://sergeybratus.github.io/RE-basics-W22/day2-slides.pdf">Day 2 slides</a>
 
-<p><a href="https://sergeybratus.github.io/RE-basics-W22/readings1">Day 1 readings and notes</a>
+<p><a href="https://sergeybratus.github.io/RE-basics-W22/readings1">Day 2 readings and notes</a>
 
 <p><a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/">Day 2 examples</a>, 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/homework2/">homework</a>,
