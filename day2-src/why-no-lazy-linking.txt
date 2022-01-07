@@ -1,0 +1,169 @@
+
+Terms: Dynamic linking is called 'lazy' when the addresses of dynamically linked functions
+       are only looked up when the function is first called. Generally speaking, 'lazy'
+       (or 'lazy binding') is the default.
+
+How lazy binding works: When the linker produces a dynamically linked executable, it
+       inserts short stubs (aka thunks) for the external functions that will be loaded at
+       runtime. Calls to an external function that resides in a dynamic library to be
+       loaded at runtime actually point at that function's thunk. The thunks are placed
+       back-to-back in the section called the Procedure Linkage Table (or PLT).  Each
+       thunk starts with an indirect jump to an address stored in the special table,
+       Global Offset Table (or GOT), which is its own section. Each PLT thunk has its own
+       GOT entry, which initially points right back at the thunk and causes control to
+       go into the dynamic loader. After the loader loads the library and computes the
+       address of the desired function, it changes the GOT entry to that address. The
+       next call to the function will still land at the thunk, but will then sail right
+       through to the function's start.
+
+The mystery: while trying to show in class how lazy dynamic linking worked, I was
+       repeatedly running into the GOT entry _already_ pointing to the actual function,
+       even before the first call to that function. What was going on?
+
+The solution: The executable was not, in fact, compiled for lazy binding! It was instead
+       build with the "link now" linker option ("-z now", as opposed to the default "-z
+       lazy"), which loads the needed dynamic libraries and resolves the symbols as the
+       process is created, before the entry point is given control. This behavior is
+       similar to what happens when the environment variable LD_BIND_NOW is set in the
+       calling shell.
+
+       So it wasn't anything funny that gdb was doing, like turning off ASLR. It was what
+       the executable was instructing the dynamic loader to do, because that's how it was
+       built in the first place.
+
+How I finally saw it: I ran the linking step of GCC with -v option (verbose), looked
+       at the options, and saw "-z now". Duh.
+
+To wit:
+babylon1:~/RE-basics-W22/day2-src$ gcc -v -o hello hello.o
+Using built-in specs.
+COLLECT_GCC=gcc
+COLLECT_LTO_WRAPPER=/usr/lib/gcc/x86_64-linux-gnu/7/lto-wrapper
+OFFLOAD_TARGET_NAMES=nvptx-none
+OFFLOAD_TARGET_DEFAULT=1
+Target: x86_64-linux-gnu
+<skipped>
+gcc version 7.5.0 (Ubuntu 7.5.0-3ubuntu1~18.04) 
+COMPILER_PATH=/usr/lib/gcc/x86_64-linux-gnu/7/:/usr/lib/gcc/x86_64-linux-gnu/7/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/7/:/usr/lib/gcc/x86_64-linux-gnu/
+LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/7/:/usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/7/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/7/../../../:/lib/:/usr/lib/
+COLLECT_GCC_OPTIONS='-v' '-o' 'hello' '-mtune=generic' '-march=x86-64'
+ /usr/lib/gcc/x86_64-linux-gnu/7/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/7/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/7/lto-wrapper -plugin-opt=-fresolution=/tmp/ccGyWEKM.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie       -z now      -z relro      -o hello /usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/7/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/7 -L/usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/7/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/7/../../.. hello.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/7/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu/crtn.o
+COLLECT_GCC_OPTIONS='-v' '-o' 'hello' '-mtune=generic' '-march=x86-64'
+
+
+    I actually knew about this compilation option as a mitigation for particular
+    GOT-hijacking attacks---any writable memory location that contains an address used in
+    an indirect jump is a potential target for control hijacking---but it did not occur to
+    me that it was how GCC on the babylonX machines was configured. Duh.
+
+
+More info: 
+    https://stackoverflow.com/questions/62527697/why-does-gcc-link-with-z-now-by-default-although-lazy-binding-is-the-default
+    https://hockeyinjune.medium.com/relro-relocation-read-only-c8d0933faef3
+
+OK, can we see actual lazy linking now?
+    Yes. The default lazy behavior is still available, gcc just needs to be told.
+
+To wit:
+babylon1:~/RE-basics-W22/day2-src$ gcc -v -z lazy -o hello hello.o
+<skipped; note -z lazy actually appearing in the options passed to collect2 the linker>
+
+COLLECT_GCC_OPTIONS='-v' '-z' 'lazy' '-o' 'hello' '-mtune=generic' '-march=x86-64'
+ /usr/lib/gcc/x86_64-linux-gnu/7/collect2 -plugin /usr/lib/gcc/x86_64-linux-gnu/7/liblto_plugin.so -plugin-opt=/usr/lib/gcc/x86_64-linux-gnu/7/lto-wrapper -plugin-opt=-fresolution=/tmp/cc63puU8.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -z now -z relro -o hello -z lazy /usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/7/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/7 -L/usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/7/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/7/../../.. hello.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/7/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/7/../../../x86_64-linux-gnu/crtn.o
+COLLECT_GCC_OPTIONS='-v' '-z' 'lazy' '-o' 'hello' '-mtune=generic' '-march=x86-64'
+
+babylon1:~/RE-basics-W22/day2-src$ gdb hello
+<skipped>
+
+(gdb) b main
+Breakpoint 1 at 0x63e
+(gdb) r
+Starting program: /thayerfs/home/d10073q/RE-basics-W22/day2-src/hello 
+
+Breakpoint 1, 0x000055555555463e in main ()
+(gdb) disas
+Dump of assembler code for function main:
+   0x000055555555463a <+0>:	push   %rbp
+   0x000055555555463b <+1>:	mov    %rsp,%rbp
+=> 0x000055555555463e <+4>:	sub    $0x10,%rsp
+   0x0000555555554642 <+8>:	movl   $0xa,-0x4(%rbp)
+   0x0000555555554649 <+15>:	jmp    0x55555555465b <main+33>
+   0x000055555555464b <+17>:	lea    0xa2(%rip),%rdi        # 0x5555555546f4
+   0x0000555555554652 <+24>:	callq  0x555555554510 <puts@plt>
+   0x0000555555554657 <+29>:	subl   $0x1,-0x4(%rbp)
+   0x000055555555465b <+33>:	cmpl   $0x0,-0x4(%rbp)
+   0x000055555555465f <+37>:	jns    0x55555555464b <main+17>
+   0x0000555555554661 <+39>:	mov    $0x2a,%eax
+   0x0000555555554666 <+44>:	leaveq 
+   0x0000555555554667 <+45>:	retq   
+End of assembler dump.
+
+// Let's see the thunk with it's indirect jump:
+
+(gdb) x/5i 0x555555554510
+   0x555555554510 <puts@plt>:	jmpq   *0x200b02(%rip)        # 0x555555755018
+   0x555555554516 <puts@plt+6>:	pushq  $0x0
+   0x55555555451b <puts@plt+11>:	jmpq   0x555555554500
+   0x555555554520 <__cxa_finalize@plt>:	jmpq   *0x200ad2(%rip)        # 0x555555754ff8
+   0x555555554526 <__cxa_finalize@plt+6>:	xchg   %ax,%ax
+
+// This is the thunk's paired GOT entry. As expected, it points right back into the thunk, to "pushq"
+
+(gdb) x/gx 0x555555755018
+0x555555755018:	0x0000555555554516
+
+// Now let's add a breakpoint right after the puts() invocation.
+
+(gdb) b *0x0000555555554657
+Breakpoint 2 at 0x555555554657
+
+// ..and execute until we hit it. "Hello" is printed.
+
+(gdb) c
+Continuing.
+Hello
+
+Breakpoint 2, 0x0000555555554657 in main ()
+(gdb) disas
+Dump of assembler code for function main:
+   0x000055555555463a <+0>:	push   %rbp
+   0x000055555555463b <+1>:	mov    %rsp,%rbp
+   0x000055555555463e <+4>:	sub    $0x10,%rsp
+   0x0000555555554642 <+8>:	movl   $0xa,-0x4(%rbp)
+   0x0000555555554649 <+15>:	jmp    0x55555555465b <main+33>
+   0x000055555555464b <+17>:	lea    0xa2(%rip),%rdi        # 0x5555555546f4
+   0x0000555555554652 <+24>:	callq  0x555555554510 <puts@plt>
+=> 0x0000555555554657 <+29>:	subl   $0x1,-0x4(%rbp)
+   0x000055555555465b <+33>:	cmpl   $0x0,-0x4(%rbp)
+   0x000055555555465f <+37>:	jns    0x55555555464b <main+17>
+   0x0000555555554661 <+39>:	mov    $0x2a,%eax
+   0x0000555555554666 <+44>:	leaveq 
+   0x0000555555554667 <+45>:	retq   
+End of assembler dump.
+
+// And now the GOT entry points to the puts implementation in the loaded libc:
+
+(gdb) x/gx 0x555555755018
+0x555555755018:	0x00007ffff7a62aa0
+
+(gdb) disas 0x00007ffff7a62aa0
+Dump of assembler code for function _IO_puts:     <<<<<<<
+   0x00007ffff7a62aa0 <+0>:	push   %r13
+   0x00007ffff7a62aa2 <+2>:	push   %r12
+   0x00007ffff7a62aa4 <+4>:	mov    %rdi,%r12
+
+(gdb) quit
+
+    And that's it :) My virtual machine did not have this mitigation enabled.
+
+So how is this different from static linking?
+   The dynamic linking advantages of sharing read-only code pages between processes are still there.
+   The same physical page of Libc functions can still be mapped into many processes. The performance
+   tradeoff of lazy linking isn't necessarily all that large these days, but memory savings are
+   likely still substantial.
+
+
+
+
+
+
