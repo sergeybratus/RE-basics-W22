@@ -23,8 +23,6 @@ Although the focus and pre-requisites of the course will not change, week-by-wee
 
 <hr>
 
-<hr>
-
 <p><a href="https://sergeybratus.github.io/RE-basics-W22/day2-slides.pdf">Day 2 slides</a>
 
 <p><a href="https://sergeybratus.github.io/RE-basics-W22/readings1">Day 2 readings and notes</a>
@@ -32,6 +30,8 @@ Although the focus and pre-requisites of the course will not change, week-by-wee
 <p><a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/">Day 2 examples</a>, 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/homework2/">homework</a>,
 and a resolution for the in-class embarrassing <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/why-no-lazy-linking.txt">dynamic linking mystery</a>.
+
+<hr>
 
 Notes from the X-hour: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day2-src/l-vs-g.c">local vs global variables</a>, notes on
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/notes/c-compilation-and-linking.txt">compilation</a>,
