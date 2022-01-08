@@ -33,10 +33,10 @@ and a resolution for the in-class embarrassing <a href="https://github.com/serge
 
 <hr>
 
-Notes from the X-hour: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day2-src/l-vs-g.c">local vs global variables</a>, notes on
+Notes from the X-hour: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day2-src/notes/local-vs-global-xhour-notes.txt">local vs global variables</a> and related topics. I also posted notes on
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/notes/c-compilation-and-linking.txt">compilation</a>,
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/notes/c-optimization-vs-code.txt">optimization</a>,
-<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/notes/hello-world-disasm.txt">hello world disassembly example on MacOS</a>.
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/notes/hello-world-disasm.txt">hello world disassembly example</a>, based on x86 MacOS binary environment.
 
 <hr>
 

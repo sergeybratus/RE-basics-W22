@@ -1,0 +1,181 @@
+================[ Local vs global variables ]===============
+
+In this example we'll see how references to C stack-local and file-scoped
+global variables are treated in assembly.
+
+# cat l-vs-g.c
+
+#include <stdio.h>
+
+int x = 1;
+int y = 200;
+
+void g();
+
+int main()
+{
+     int x  = 100;  // this local definition shadows the global x
+     printf( "x=%d y=%d\n", x, y);
+
+     g();
+     return 0;
+}
+
+void g()
+{
+     printf( "x=%d\n", x);
+     printf( "x=%d\n", y);
+}
+
+# gcc -o l-vs-g l-vs-g.c
+
+l-vs-g:     file format elf64-x86-64
+
+<skipped till _main>
+
+000000000000064a <main>:
+ 64a:	55                   	push   %rbp
+ 64b:	48 89 e5             	mov    %rsp,%rbp
+ 64e:	48 83 ec 10          	sub    $0x10,%rsp
+ 652:	c7 45 fc 64 00 00 00 	movl   $0x64,-0x4(%rbp)   // local x <- 100, located on stack
+ 659:	8b 15 b5 09 20 00    	mov    0x2009b5(%rip),%edx        # 201014 <y> // 3rd arg to printf
+
+                                       // The global y is located in the .data section. Do "readelf -a l-vs-g" and
+				       // note the big gap in addresses between the read-only executable segment
+				       // (which includes .text and .rodata, see lea below), and the writable
+				       //  data segment).
+
+ 65f:	8b 45 fc             	mov    -0x4(%rbp),%eax    // in olden times, loading memory from/to EAX was faster
+ 662:	89 c6                	mov    %eax,%esi          // local x -> 2nd arg to printf
+ 664:	48 8d 3d d9 00 00 00 	lea    0xd9(%rip),%rdi        # 744 <_IO_stdin_used+0x4> // 1st arg, format string
+
+                                       // Note that the format string is in the .rodata section, which is merged
+				       //  with the .text and other read-only sections into the same segment.
+				       // This is very close to the current code segment.
+
+ 66b:	b8 00 00 00 00       	mov    $0x0,%eax          // ABI: "If the callee is a variadic function,
+                                                          //  then the number of floating point arguments
+							  //  passed to the function in vector registers
+							  //  must be provided by the caller in the AL register." 
+
+ 670:	e8 ab fe ff ff       	callq  520 <printf@plt>   // printf is a variadic function! 
+ 675:	b8 00 00 00 00       	mov    $0x0,%eax
+ 67a:	e8 07 00 00 00       	callq  686 <g>
+ 67f:	b8 00 00 00 00       	mov    $0x0,%eax
+ 684:	c9                   	leaveq    // sets rsp back to top of frame, does "mov %rbp,%rsp; pop %rbp"
+                                          //  cf. https://c9x.me/x86/html/file_module_x86_id_154.html
+ 685:	c3                   	retq   
+
+0000000000000686 <g>:
+ 686:	55                   	push   %rbp
+ 687:	48 89 e5             	mov    %rsp,%rbp
+ 68a:	8b 05 80 09 20 00    	mov    0x200980(%rip),%eax        # 201010 <x> -- global x, neighbor of global y
+ 690:	89 c6                	mov    %eax,%esi
+ 692:	48 8d 3d b6 00 00 00 	lea    0xb6(%rip),%rdi        # 74f <_IO_stdin_used+0xf>
+
+                                       // This is the same format string as above, but, being referenced from
+				       //  the current instruction's address, it has a different offset here
+				       //  from the one above. Its offset will be different for any instruction.
+
+ 699:	b8 00 00 00 00       	mov    $0x0,%eax          // remember that printf is variadic and needs this
+ 69e:	e8 7d fe ff ff       	callq  520 <printf@plt>
+ 6a3:	8b 05 6b 09 20 00    	mov    0x20096b(%rip),%eax        # 201014 <y>
+
+                                       // same global variable in .data, different offset relative to this instruction
+
+ 6a9:	89 c6                	mov    %eax,%esi
+ 6ab:	48 8d 3d a3 00 00 00 	lea    0xa3(%rip),%rdi        # 755 <_IO_stdin_used+0x15> -- new offset again
+ 6b2:	b8 00 00 00 00       	mov    $0x0,%eax
+ 6b7:	e8 64 fe ff ff       	callq  520 <printf@plt>
+ 6bc:	90                   	nop                       
+ 6bd:	5d                   	pop    %rbp
+ 6be:	c3                   	retq   
+ 6bf:	90                   	nop
+
+<skip the rest>
+
+Note that the text and data segments load addresses are joined rigidly, because the instructions
+in the .text section reference the globals in .data by fixed offsets. Such things undermine ASLR.
+
+Also note that these offsets inside instructions are filled by the linker. Compiling the actual
+compilation unit leaves them all as zeros, as you'll see with "gcc -c -o l-vs-g.o l-vs-g.c" and
+"objdump -d l-vs-g.o". 
+
+These all-zero offsets will be backfilled by the linker, based on the relocation (".rela.text") sections,
+which record where these offsets are in the .o object file. You'll see them with "readelf -W -a l-vs-g.o",
+pointing right into the middle of the respective instructions past the opcode bytes, just where
+the offsets start. This is how the linker knows where they are, and what type of offsets they are
+(e.g., 32-bit, relative to the 64-bit rip, R_X86_64_PC32 [*]). These types are an essential
+and underappreciated part of the ABI.
+
+* Cf. https://www.technovelty.org/c/position-independent-code-and-x86-64-libraries.html
+
+--------
+
+Let's now compile the same code with -fomit-frame-pointer. Globals won't change, locals will.
+
+$ gcc -o l-vs-g-nofp -fomit-frame-pointer l-vs-g.c 
+$ objdump -d l-vs-g-nofp 
+
+<skip>
+
+000000000000064a <main>:
+ 64a:	48 83 ec 18          	sub    $0x18,%rsp        // no rpb saved on the stack, but the previous return
+                                                         //  address is there, taking 8 bytes. With these 24 bytes,
+							 //  the stack frame 24+8=32 bytes, 32-byte multiple,
+							 //  which plays nicely with CPU cache lines.
+ 64e:	c7 44 24 0c 64 00 00 	movl   $0x64,0xc(%rsp)   // the local x is now _above_ the rsp, was moved by previous
+                                                         //  instruction. What was at rpb-4 is now at rsp+12 
+ 655:	00 
+ 656:	8b 15 b8 09 20 00    	mov    0x2009b8(%rip),%edx        # 201014 <y>   // global y
+ 65c:	8b 44 24 0c          	mov    0xc(%rsp),%eax    // local x again
+ 660:	89 c6                	mov    %eax,%esi
+ 662:	48 8d 3d eb 00 00 00 	lea    0xeb(%rip),%rdi        # 754 <_IO_stdin_used+0x4>
+ 669:	b8 00 00 00 00       	mov    $0x0,%eax
+ 66e:	e8 ad fe ff ff       	callq  520 <printf@plt>
+ 673:	b8 00 00 00 00       	mov    $0x0,%eax
+ 678:	e8 0a 00 00 00       	callq  687 <g>
+ 67d:	b8 00 00 00 00       	mov    $0x0,%eax
+ 682:	48 83 c4 18          	add    $0x18,%rsp        // fix up the stack
+ 686:	c3                   	retq                     // and the stack pointer now is again 16- or 32-byte aligned.
+
+Stack alignment is an important optimization. Note that _start, the function at the ELF entry point,
+contains an instruction that assures that the initial stack address is a multiple of 16 bytes (a.k.a.
+16-byte aligned). 
+
+0000000000000540 <_start>:
+ 540:	31 ed                	xor    %ebp,%ebp
+ 542:	49 89 d1             	mov    %rdx,%r9
+ 545:	5e                   	pop    %rsi
+ 546:	48 89 e2             	mov    %rsp,%rdx
+ 549:	48 83 e4 f0          	and    $0xfffffffffffffff0,%rsp    // <---- align stack at 16 bytes multiple
+ 54d:	50                   	push   %rax                        
+ 54e:	54                   	push   %rsp
+ 54f:	4c 8d 05 ea 01 00 00 	lea    0x1ea(%rip),%r8        # 740 <__libc_csu_fini>   // function pointer
+ 556:	48 8d 0d 73 01 00 00 	lea    0x173(%rip),%rcx        # 6d0 <__libc_csu_init>  // ...and another
+ 55d:	48 8d 3d e6 00 00 00 	lea    0xe6(%rip),%rdi        # 64a <main>              // ...and another, to main()  
+ 564:	ff 15 76 0a 20 00    	callq  *0x200a76(%rip)        # 200fe0 <__libc_start_main@GLIBC_2.2.5>
+ 56a:	f4                   	hlt                           // we are not meant to reach this, so crash if we do! 
+ 56b:	0f 1f 44 00 00       	nopl   0x0(%rax,%rax,1)       // we want the next function to be aligned 
+
+The C standard library's startup logic that sets up the process space, makes sure the expected arguments to
+main() are lined up for main(), and finally calls main() is always changing. In general, expect to see
+several initialization functions to be called, which are supplied by special-purpose code sections like .init
+and parametrized by special-purpose data sections like .init_array or .ctors, and then a funtion like
+__libc_start_main to be called, which will in turn call main() itself. Note that Unix's main() depends
+on a complex setup of _two_ complex pointer array arguments, argv and envp:
+     int main (int argc, char *argv[], char *envp[])
+(cf. https://www.gnu.org/software/libc/manual/html_node/Program-Arguments.html)
+
+There are various descriptions of the pre-main setup, take your pick:
+
+http://dbp-consulting.com/tutorials/debugging/linuxProgramStartup.html -- one of my favorites
+https://michaeltrottier.com/en/gdb/gdb-what-happens-main/              -- hands-on with GDB
+https://0xax.gitbooks.io/linux-insides/content/Misc/linux-misc-4.html  -- nice book format
+
+https://unix.stackexchange.com/questions/608564/does-start-call-my-programs-main-function-and-other-essential-setup-functions
+https://refspecs.linuxfoundation.org/LSB_2.0.1/LSB-Core/LSB-Core/baselib---libc-start-main-.html
+https://linuxgazette.net/issue84/hawk.html
+
+
+
