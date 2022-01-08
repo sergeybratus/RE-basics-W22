@@ -31,7 +31,12 @@ Although the focus and pre-requisites of the course will not change, week-by-wee
 
 <p><a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/">Day 2 examples</a>, 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/homework2/">homework</a>,
-and a resultion for the in-class embarrassing <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/why-no-lazy-linking.txt">dynamic linking mystery</a>.
+and a resolution for the in-class embarrassing <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/why-no-lazy-linking.txt">dynamic linking mystery</a>.
+
+Notes from the X-hour: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day2-src/l-vs-g.c">local vs global variables</a>, notes on
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/notes/c-compilation-and-linking.txt">compilation</a>,
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/notes/c-optimization-vs-code.txt">optimization</a>,
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day2-src/notes/hello-world-disasm.txt">hello world disassembly example on MacOS</a>.
 
 <hr>
 
