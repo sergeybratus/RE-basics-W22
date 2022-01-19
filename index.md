@@ -40,6 +40,7 @@ Notes from the X-hour: <a href="https://github.com/sergeybratus/RE-basics-W22/bl
 
 <hr>
 
+<a href="http://www.c-jump.com/CIS77/CPU/Numbers/U77_0160_sign_extension.htm">Signed arithmetic and basic syscalls</a>, <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day5-src/shellcode.txt">simple shellcode</a>, with <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day5-src">examples</a>. 
 
 
 
