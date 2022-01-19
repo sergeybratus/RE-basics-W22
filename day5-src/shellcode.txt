@@ -4,13 +4,18 @@ Attackers typically don't start with access to the compiler build
 chain on your system or to its standard libraries. However, software
 vulnerabilities occasionally give them the opportunity to inject and
 run some binary code snippets on your system, supplied via a buffer
-overflow or some other memory corruption.
+overflow or some other form of memory corruption.
 
 A binary code snippet that---when your program is somehow tricked 
 into running it---gives the attacker access to a command shell,
-is called "shellcode". It usually combines one or more system calls.
+is called "shellcode". It usually combines one or more system calls
+in a minimal compiled binary snippet.
 
-There's a simple way of testing what these code snippets from a C
+There are several collections of shellcode online, including
+http://shell-storm.org/shellcode/ (look for the Linux and Intel x86-64
+section).
+
+There's a simple way of testing these binary snippets from a C
 program: take the snippet as a string of bytes, copy them to an
 executable memory region, and then JMP or CALL to the address where
 they had been copied. The binary code will execute, and will
@@ -23,12 +28,18 @@ sergey@babylon1:~$ cat sh1.c
 #include <stdio.h>
 #include <string.h>
 
+// Const is important here: we are abusing the fact that const strings are placed into the .rodata
+//  ELF section, which is grouped with .text into an executable program segment, and can
+//  therefore be JMP-ed or CALL-ed into. Check with "readelf -a " if .rodata is actually
+//  executable on your machine: some Linux distributions started grouping and loading it
+//  into a separate non-executable segment. For those cases, see the sh2.c example.
+
 const char code[] = "\x31\xc0\x48\xbb\xd1\x9d\x96\x91\xd0\x8c\x97\xff\x48\xf7\xdb\x53\x54\x5f\x99\x52\x57\x54\x5e\xb0\x3b\x0f\x05";
 
 int main()
 {
     printf("len:%d bytes\n", strlen(code));
-    (*(void(*)()) code)();
+    (*(void(*)()) code)();  // code is cast to a function pointer, then the pointed-to function is called
     return 0;
 }
 
@@ -101,7 +112,7 @@ Dump of assembler code for function main:
    0x000055555555465f <+21>:	callq  0x555555554520 <printf@plt>
    0x0000555555554664 <+26>:	lea    0xa5(%rip),%rdx        # 0x555555554710 <code>
    0x000055555555466b <+33>:	mov    $0x0,%eax
-   0x0000555555554670 <+38>:	callq  *%rdx
+   0x0000555555554670 <+38>:	callq  *%rdx      // this is what a function call via pointer is compiled into
    0x0000555555554672 <+40>:	mov    $0x0,%eax
    0x0000555555554677 <+45>:	pop    %rbp
    0x0000555555554678 <+46>:	retq   
