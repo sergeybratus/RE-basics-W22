@@ -1,0 +1,463 @@
+========[ 2's complement integer arithmetic and sign extensions ]=============
+
+sergey@babylon1:~$ cat sign.c
+
+#include <stdio.h>
+
+int main(){
+  int  x = -1;     // four-byte variable
+  char c = -2;     // one-byte variable
+
+  long long y = 10;  // eight-byte variable
+  long long z;
+
+  x = x + c;       // note disparity of sizes. C handles the necessary conversion implicitly
+  
+  z = y*x;
+  printf( "%d %llx \n", z, z);  // also try %u instead of %d
+  return z;                     // another conversion! How is it done? 
+}
+
+sergey@babylon1:~$ gcc -g -o sign sign.c
+sign.c: In function ‘main’:
+sign.c:13:13: warning: format ‘%s’ expects argument of type ‘char *’, but argument 2 has type ‘long long int’ [-Wformat=]
+   printf( "%su %llx \n", z, z);
+            ~^
+            %lld
+
+sergey@babylon1:~$ gdb sign
+GNU gdb (Ubuntu 8.1.1-0ubuntu1) 8.1.1
+Copyright (C) 2018 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+<http://www.gnu.org/software/gdb/documentation/>.
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from sign...done.
+
+(gdb) disas main
+Dump of assembler code for function main:
+   0x000000000000064a <+0>:	push   %rbp
+   0x000000000000064b <+1>:	mov    %rsp,%rbp
+   0x000000000000064e <+4>:	sub    $0x20,%rsp
+   0x0000000000000652 <+8>:	movl   $0xffffffff,-0x14(%rbp) // x = -1; that's what the 32-bit "-1" looks like in 2's complement 
+   0x0000000000000659 <+15>:	movb   $0xfe,-0x15(%rbp)       // c = -2; 0xfe is "-2" as an 8-bit 2's complement. Note that adding 2's complements of different widths, such as 0xfe and 0xffffffff, will not work    
+   0x000000000000065d <+19>:	movq   $0xa,-0x10(%rbp)        // y = 10; note that this is 64-bit load
+   0x0000000000000665 <+27>:	movsbl -0x15(%rbp),%eax   // 8-bit c gets sign-extended to 32 bits, becomes 0xfffffffe loaded into eax. The top half of rax will be 0s, see below. 
+   0x0000000000000669 <+31>:	add    %eax,-0x14(%rbp)   // Note that addition is now of two 32-bit values, thanks to movsbl producing a 32-bit 2's complement representation of "-2".
+   0x000000000000066c <+34>:	mov    -0x14(%rbp),%eax
+   0x000000000000066f <+37>:	cltq                      // this extends the 32-bit "-3" is eax to a 64-bit representation of "-3" in rax (and also fills rdx with 1s, which will be overwritten by the next instruction)  
+   0x0000000000000671 <+39>:	mov    -0x10(%rbp),%rdx   // load y
+   0x0000000000000675 <+43>:	imul   %rdx,%rax          // finally, multiply!
+   0x0000000000000679 <+47>:	mov    %rax,-0x8(%rbp)    // the result is in rax. 
+   0x000000000000067d <+51>:	mov    -0x8(%rbp),%rdx
+   0x0000000000000681 <+55>:	mov    -0x8(%rbp),%rax
+   0x0000000000000685 <+59>:	mov    %rax,%rsi
+   0x0000000000000688 <+62>:	lea    0x95(%rip),%rdi        # 0x724
+   0x000000000000068f <+69>:	mov    $0x0,%eax
+   0x0000000000000694 <+74>:	callq  0x520 <printf@plt>
+   0x0000000000000699 <+79>:	mov    -0x8(%rbp),%rax
+   0x000000000000069d <+83>:	leaveq 
+   0x000000000000069e <+84>:	retq   
+End of assembler dump.
+
+// Let's see this in action.
+
+(gdb) b main
+Breakpoint 1 at 0x652: file sign.c, line 4.
+
+(gdb) r
+Starting program: /thayerfs/home/sergey/sign 
+
+Breakpoint 1, main () at sign.c:4
+4	  int  x = -1;
+
+(gdb) disas
+Dump of assembler code for function main:
+   0x000055555555464a <+0>:	push   %rbp
+   0x000055555555464b <+1>:	mov    %rsp,%rbp
+   0x000055555555464e <+4>:	sub    $0x20,%rsp
+=> 0x0000555555554652 <+8>:	movl   $0xffffffff,-0x14(%rbp)
+   0x0000555555554659 <+15>:	movb   $0xfe,-0x15(%rbp)
+   0x000055555555465d <+19>:	movq   $0xa,-0x10(%rbp)
+   0x0000555555554665 <+27>:	movsbl -0x15(%rbp),%eax
+   0x0000555555554669 <+31>:	add    %eax,-0x14(%rbp)
+   0x000055555555466c <+34>:	mov    -0x14(%rbp),%eax
+   0x000055555555466f <+37>:	cltq   
+   0x0000555555554671 <+39>:	mov    -0x10(%rbp),%rdx
+   0x0000555555554675 <+43>:	imul   %rdx,%rax
+   0x0000555555554679 <+47>:	mov    %rax,-0x8(%rbp)
+   0x000055555555467d <+51>:	mov    -0x8(%rbp),%rdx
+   0x0000555555554681 <+55>:	mov    -0x8(%rbp),%rax
+   0x0000555555554685 <+59>:	mov    %rax,%rsi
+   0x0000555555554688 <+62>:	lea    0x95(%rip),%rdi        # 0x555555554724
+   0x000055555555468f <+69>:	mov    $0x0,%eax
+   0x0000555555554694 <+74>:	callq  0x555555554520 <printf@plt>
+   0x0000555555554699 <+79>:	mov    -0x8(%rbp),%rax
+   0x000055555555469d <+83>:	leaveq 
+   0x000055555555469e <+84>:	retq   
+End of assembler dump.
+
+(gdb) b *0x0000555555554665
+Breakpoint 2 at 0x555555554665: file sign.c, line 10.
+
+(gdb) c
+Continuing.
+
+Breakpoint 2, main () at sign.c:10
+10	  x = x + c;
+
+// before the instruction at this breakpoint, eax is whatever it was before main() was called
+
+(gdb) i r eax
+eax            0x5555464a	1431651914
+
+// we single-step execute the instruction at breakpoint...
+
+(gdb) si
+0x0000555555554669	10	  x = x + c;
+
+// ..and eax (and rax) now holds a 32-bit 2's complement representation of "-2":
+
+(gdb) i r eax
+eax            0xfffffffe	-2
+
+// ...except for rax this looks like it's a postive number, with the top half of rax
+//    being all 0s:
+
+(gdb) i r rax
+rax            0xfffffffe	4294967294
+
+(gdb) b *0x000055555555466f
+Breakpoint 3 at 0x55555555466f: file sign.c, line 12.
+
+(gdb) c
+Continuing.
+
+Breakpoint 3, 0x000055555555466f in main () at sign.c:12
+12	  z = y*x;
+
+// To multiply this 32-bit "-3" by a 64-bit number, we must produce its
+//   64-bit representation. Cltd will do it.
+
+(gdb) i r rax rdx
+rax            0xfffffffd	4294967293
+rdx            0x7fffffffe658	140737488348760
+
+// Now execute cltq
+
+(gdb) si
+0x0000555555554671	12	  z = y*x;
+
+// ...and we now have a proper 64-bit 2's complement representation of "-3" in rax:
+
+(gdb) i r rax rdx
+rax            0xfffffffffffffffd	-3
+rdx            0x7fffffffe658	140737488348760
+
+
+(gdb) si
+0x0000555555554675	12	  z = y*x;
+
+// load rdx with y
+
+(gdb) i r rax rdx
+rax            0xfffffffffffffffd	-3
+rdx            0xa	10
+
+// ...and finally execute imul:
+
+(gdb) si
+0x0000555555554679	12	  z = y*x;
+
+// It worked!
+
+(gdb) i r rax rdx
+rax            0xffffffffffffffe2	-30
+rdx            0xa	10
+
+(gdb) quit
+A debugging session is active.
+
+	Inferior 1 [process 3373] will be killed.
+
+Quit anyway? (y or n) y
+
+More on this: http://www.c-jump.com/CIS77/CPU/Numbers/U77_0160_sign_extension.htm
+
+=====================[ System calls in amd64 ABI ]======================
+
+To open, read, or write a file (as well as to check on the file's
+permissions, timestamps, or whether the file with a given name
+actually exists), or to create a new process from an executable file,
+your program will somehow need to access the disk.  Information,
+including file names and their access permissions, is stored on the
+disk in binary blocks, and there is a long chain of translations
+between the contents of these block and the standard library functions
+that your language uses to work on files or create new processes.
+
+Somewhere in-between, there is an all-important jump between the
+"userland" code and the operating system code. Think of it as a
+checking funnel; before any change to the OS state (including disk)
+can succeed, it should be checked for consistency and permissions.
+Standard library functions like open(), read(), write(), socket(),
+fork(), exec(), etc. all go through this funnel.
+
+In modern systems, all these calls go through a single entry point in
+the kernel that first checks the ownership and permissions of your
+process vs the permissions of a file or directory, and rejects requests
+that aren't permitted. If they are, this code dispatches the request
+to the particular kernel drivers. 
+
+The most important idea here is that only code past this point can
+affect the internal bookkeeping of the OS, the disk, and of other
+devices. That way, the OS bookkeeping data is kept consistent, and
+can't be maliciously or inadvertently corrupted by userland
+programs. When trying to perform a potentially corrupting action,
+these programs will run into errors or crash, but the OS will
+continue, and your disk data blocks and process table will remain
+consistent.
+
+So in any language the standard system library functions translate the
+requested operations to these primitive OS operations, *system
+calls*. The library calls really serve as wrappers; the system calls
+can be called directly from the binary code.
+
+System calls are a part of the Application Binary Interface (ABI).  A
+program can perform system actions like input, output, or starting
+other programs only through the ABI; otherwise, the system could be
+crashed by any user program doing a wrong thing (as it used to happen
+to MS-DOS, early Windows, and Mac OS prior to Mac OS X).
+
+So standard system libraries serve as mere wrappers around system
+calls.  System calls are accomplished by a special instruction (such
+as SYSCALL, SYSENTER, or INT 0x80, depending on your system) that
+gives control to the kernel, and elevates the privilege of that code
+to a higher level. The data of the disks or of the process table can
+only be read or written at that privilege level (in x86, it is called
+"ring 0", your userland program running at "ring 3"; lower ring number
+means more privilege in x86 terms). 
+
+System calls have their own calling conventions, which may differ from
+the normal function calling conventions (but, in 64-bit code, not
+much, as arguments to system calls are still passed in registers.)
+The biggest difference is that, after the arguments have been staged,
+a function is called with the CALL <address> instruction, whereas the
+system calls are initiated with SYSCALL, SYSENTER, or INT 0x80. There
+is no address the user can specify; instead, all system calls go to
+a single entry point in the kernel, where the user code has no
+control, and where the permissions for the requested operations are
+checked.
+
+Of all systems programming developments since 1990s, this scheme of
+constructing OSes is still the most important in practical terms.  We
+learn the details of it in CS58 and in CS258, but it pays to
+understand it no matter what kind of programming you do.
+
+One important note about the system call ABI and convention: system
+calls have numbers, not names. When making the system call in
+assembly, its number is placed in RAX (or EAX). On {\tt x86_64}, 
+arguments go into registers, in the same order as for function calls,
+with an exception for {\tt rcx} (see the ABI documentation, section A.2.1). 
+Tables of these numbers are different for every OS; see below.
+
+Let's see syscalls in action. We'll start with the write(2) syscall:
+
+// Credit: https://sys.readthedocs.io/en/latest/doc/07_calling_system_calls.html
+
+sergey@babylon1:~$ cat w0.c
+#include <fcntl.h>
+#include <unistd.h>
+
+int main ()
+{
+    write (1, "Hello World\n", 12);
+    return 0;
+}
+
+sergey@babylon1:~$ gcc -g -o w0 w0.c
+
+sergey@babylon1:~$ gdb w0
+GNU gdb (Ubuntu 8.1.1-0ubuntu1) 8.1.1
+Copyright (C) 2018 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+<http://www.gnu.org/software/gdb/documentation/>.
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from w0...done.
+
+(gdb) disas main
+Dump of assembler code for function main:
+   0x000000000000064a <+0>:	push   %rbp
+   0x000000000000064b <+1>:	mov    %rsp,%rbp
+   0x000000000000064e <+4>:	mov    $0xc,%edx
+   0x0000000000000653 <+9>:	lea    0x9a(%rip),%rsi        # 0x6f4
+   0x000000000000065a <+16>:	mov    $0x1,%edi
+   0x000000000000065f <+21>:	callq  0x520 <write@plt>
+   0x0000000000000664 <+26>:	mov    $0x0,%eax
+   0x0000000000000669 <+31>:	pop    %rbp
+   0x000000000000066a <+32>:	retq   
+End of assembler dump.
+
+// Before we run the program, GDB shows relocation offsets rather than real addresses,
+//  and PLT stubs instead of actual linked library functions
+
+(gdb) disas write
+Dump of assembler code for function write@plt:
+   0x0000000000000520 <+0>:	jmpq   *0x200aaa(%rip)        # 0x200fd0
+   0x0000000000000526 <+6>:	pushq  $0x0
+   0x000000000000052b <+11>:	jmpq   0x510
+End of assembler dump.
+
+(gdb) b main
+Breakpoint 1 at 0x64e: file w0.c, line 6.
+
+(gdb) r
+Starting program: /thayerfs/home/sergey/w0 
+
+Breakpoint 1, main () at w0.c:6
+6	    write (1, "Hello World\n", 12);
+
+// But after we run it, we'll see real load addresses and functions:
+
+(gdb) disas write
+Dump of assembler code for function __GI___libc_write:
+   0x00007ffff7af2210 <+0>:	lea    0x2e07c1(%rip),%rax        # 0x7ffff7dd29d8 <__libc_multiple_threads>
+   0x00007ffff7af2217 <+7>:	mov    (%rax),%eax
+   0x00007ffff7af2219 <+9>:	test   %eax,%eax
+   0x00007ffff7af221b <+11>:	jne    0x7ffff7af2230 <__GI___libc_write+32>
+   0x00007ffff7af221d <+13>:	mov    $0x1,%eax   // Cf. system call number for write,
+e.g., https://filippo.io/linux-syscall-table/
+
+   0x00007ffff7af2222 <+18>:	syscall            // jumps into the kernel space
+   0x00007ffff7af2224 <+20>:	cmp    $0xfffffffffffff000,%rax
+   0x00007ffff7af222a <+26>:	ja     0x7ffff7af2280 <__GI___libc_write+112>
+   0x00007ffff7af222c <+28>:	repz retq 
+   0x00007ffff7af222e <+30>:	xchg   %ax,%ax
+   0x00007ffff7af2230 <+32>:	push   %r12
+   0x00007ffff7af2232 <+34>:	push   %rbp
+   0x00007ffff7af2233 <+35>:	mov    %rdx,%r12
+   0x00007ffff7af2236 <+38>:	push   %rbx
+   0x00007ffff7af2237 <+39>:	mov    %rsi,%rbp
+   0x00007ffff7af223a <+42>:	mov    %edi,%ebx
+   0x00007ffff7af223c <+44>:	sub    $0x10,%rsp
+   0x00007ffff7af2240 <+48>:	callq  0x7ffff7b12570 <__libc_enable_asynccancel>
+   0x00007ffff7af2245 <+53>:	mov    %r12,%rdx
+   0x00007ffff7af2248 <+56>:	mov    %eax,%r8d
+   0x00007ffff7af224b <+59>:	mov    %rbp,%rsi
+   0x00007ffff7af224e <+62>:	mov    %ebx,%edi
+   0x00007ffff7af2250 <+64>:	mov    $0x1,%eax
+---Type <return> to continue, or q <return> to quit---q
+Quit
+(gdb) quit
+A debugging session is active.
+
+	Inferior 1 [process 60809] will be killed.
+
+Quit anyway? (y or n) y
+
+// Glibc provides a universal wrapper for the generic syscall, just in case
+//  the specific library wrapper for a syscall is not available, or doesn't
+//  provide the right arguments. In our next example, we use it instead of write(2).
+
+sergey@babylon1:~$ cat w1.c
+
+#include <unistd.h>
+#include <sys/syscall.h>
+
+int main ()
+{
+    syscall (1, 1, "Hello World", 11);
+    return 0;
+}
+
+sergey@babylon1:~$ gcc -g -o w1 w1.c
+
+sergey@babylon1:~$ ./w1
+Hello Worldsergey@babylon1:~$ 
+sergey@babylon1:~$ gdb w1
+GNU gdb (Ubuntu 8.1.1-0ubuntu1) 8.1.1
+Copyright (C) 2018 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+<http://www.gnu.org/software/gdb/documentation/>.
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from w1...done.
+
+(gdb) b main
+Breakpoint 1 at 0x64e: file w1.c, line 7.
+
+(gdb) r
+Starting program: /thayerfs/home/sergey/w1 
+
+Breakpoint 1, main () at w1.c:7
+7	    syscall (1, 1, "Hello World", 11);
+
+(gdb) disas main
+Dump of assembler code for function main:
+   0x000055555555464a <+0>:	push   %rbp
+   0x000055555555464b <+1>:	mov    %rsp,%rbp
+=> 0x000055555555464e <+4>:	mov    $0xb,%ecx
+   0x0000555555554653 <+9>:	lea    0xaa(%rip),%rdx        # 0x555555554704
+   0x000055555555465a <+16>:	mov    $0x1,%esi    // "1" for stdout
+   0x000055555555465f <+21>:	mov    $0x1,%edi    // "1" the syscall # of write
+   0x0000555555554664 <+26>:	mov    $0x0,%eax    // syscall is a VARARGS function, so we signal here we have no floating point arguments
+   0x0000555555554669 <+31>:	callq  0x555555554520 <syscall@plt>
+   0x000055555555466e <+36>:	mov    $0x0,%eax
+   0x0000555555554673 <+41>:	pop    %rbp
+   0x0000555555554674 <+42>:	retq   
+End of assembler dump.
+
+// Note the shift from syscall's 1st argument in RDI to RAX, and then of
+//   every other argument into the right register for the amd64/x86_64 syscall
+//   calling convention:
+
+(gdb) disas syscall
+Dump of assembler code for function syscall:
+   0x00007ffff7afd620 <+0>:	mov    %rdi,%rax  
+   0x00007ffff7afd623 <+3>:	mov    %rsi,%rdi
+   0x00007ffff7afd626 <+6>:	mov    %rdx,%rsi
+   0x00007ffff7afd629 <+9>:	mov    %rcx,%rdx
+   0x00007ffff7afd62c <+12>:	mov    %r8,%r10
+   0x00007ffff7afd62f <+15>:	mov    %r9,%r8
+   0x00007ffff7afd632 <+18>:	mov    0x8(%rsp),%r9
+   0x00007ffff7afd637 <+23>:	syscall 
+   0x00007ffff7afd639 <+25>:	cmp    $0xfffffffffffff001,%rax  // cf. p.125 of https://uclibc.org/docs/psABI-x86_64.pdf, item 5; this is for ERRNO handling
+   0x00007ffff7afd63f <+31>:	jae    0x7ffff7afd642 <syscall+34>
+   0x00007ffff7afd641 <+33>:	retq   
+   0x00007ffff7afd642 <+34>:	mov    0x2cf81f(%rip),%rcx        # 0x7ffff7dcce68
+   0x00007ffff7afd649 <+41>:	neg    %eax
+   0x00007ffff7afd64b <+43>:	mov    %eax,%fs:(%rcx)
+   0x00007ffff7afd64e <+46>:	or     $0xffffffffffffffff,%rax
+   0x00007ffff7afd652 <+50>:	retq   
+End of assembler dump.
+(gdb) quit
+A debugging session is active.
+
+	Inferior 1 [process 61482] will be killed.
+
+Quit anyway? (y or n) y
+
