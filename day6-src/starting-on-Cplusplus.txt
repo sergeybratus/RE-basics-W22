@@ -1,0 +1,161 @@
+
+=================[ Some lies about C++ ]================
+
+The following is not exactly true, but presents a useful mental model of how C++
+is ultimately compiled.
+
+C++ is famously concerned with objects and methods. Objects are instances of classes,
+which define methods applicable to all objects of that class. Behind all that, however,
+are ordinary functions and structs, because C++ is compiled to the same binary
+format as C code, and its linking and ABI cannot be too different from C linking. 
+
+You can think of C++ objects as structs with some extra fields, and of methods
+as regular functions with an extra first argument (called the implicit argument),
+which points to the struct instance. So you can imagine that the methods in
+
+public class Foo {
+   private:
+      int x, y;
+
+   public:
+      void do_x( int a ){
+          x += a;
+      }
+      int get_x(){
+          return x;
+      }
+}
+
+actually become some Foo_do_x( struct Foo* this, int a ) and Foo_get_x( struct Foo* this),
+and the first argument will be pointing to the specific instance of Foo, along the lines of
+
+Foo f1; f1.do_x(1);   becoming   struct Foo f1; Foo_do_x( &f1 );
+
+This is not the whole truth, but an initial prototype of C++ did, in fact,
+transform it to C in a similar way, and then compiled C.
+
+The names of C++ methods and objects are actually rewritten into so-called "mangled" forms
+that encode the arguments. These names are seen by the linker and saved in ELF symbols.
+
+More about name mangling and its different conventions: https://en.wikipedia.org/wiki/Name_mangling
+
+These mangled name  are also the long and short of how C++ _overloading_ is implemented, i.e., purely statically
+by the compiler at compile time. In a nutshell, in C++ functions are allowed to have the same name
+but different types of arguments---and the compiler will pick the specific function to generate the call to
+based on the arguments. So if you have
+
+   void do_x( int a ) { x += a; }
+   void do_x( float f ){ x += (int) f; }
+   void do_x( int a, float f ){ x += a*f; }
+
+or some such, then the compiler will pick each respective one to call for f1.do_x(4) , f1.do_x(4.0), and  
+f1.do_x( 2, 2.0 ), resolving these purely at compile time. This isn't complex at all, and doesn't
+really change much in the way of programmig convenience, but it does make operators like '<<' (as in,
+"cout << some_value" more stylistically succinct.
+
+Let's look at an example.
+
+sergey@babylon1:~/RE-basics-W22/day6-src$ cat basic.cpp 
+#include <iostream>
+
+int main(int argc, char **argv)
+{
+  std::cout << "Hello World!" << std::endl;
+
+  return 0;
+}
+
+The 'A << B' infix operator can be thought of as a function operator<<(A, B).
+So the below code is actually something like
+
+operator<<( operator<<( cout, "Hello World!" ), endl );
+
+Note that the operator<< associates to the left, i.e.,
+
+sergey@babylon1:~/RE-basics-W22/day6-src$ cat b1.cpp 
+#include <iostream>
+
+int main(int argc, char **argv)
+{
+  (std::cout << "Hello World!") << std::endl;
+
+  return 0;
+}
+
+Note that overloading of  operator<<  allows one to write the same operator
+and have different actual functions called based on the type of the argument value
+passed for printing.
+
+Let's see the default arguments in action:
+
+sergey@babylon1:~/RE-basics-W22/day6-src$ g++ -o basic basic.cpp 
+
+sergey@babylon1:~/RE-basics-W22/day6-src$ gdb basic
+GNU gdb (Ubuntu 8.1.1-0ubuntu1) 8.1.1
+<skipped>
+
+(gdb) disas main
+Dump of assembler code for function main:
+   0x00000000000008ba <+0>:	push   %rbp
+   0x00000000000008bb <+1>:	mov    %rsp,%rbp
+   0x00000000000008be <+4>:	sub    $0x10,%rsp
+   0x00000000000008c2 <+8>:	mov    %edi,-0x4(%rbp)
+   0x00000000000008c5 <+11>:	mov    %rsi,-0x10(%rbp)
+   0x00000000000008c9 <+15>:	lea    0x115(%rip),%rsi        # 0x9e5  // "Hello World!"
+   0x00000000000008d0 <+22>:	lea    0x200749(%rip),%rdi        # 0x201020 <_ZSt4cout@@GLIBCXX_3.4>
+
+      // Note that the "cout" object above is (1) allocated in .data, and (2) passed as the first argument!
+      //  The implicit argument is made explicit by the compiler. 
+
+   0x00000000000008d7 <+29>:	callq  0x770 <_ZStlsISt11char_traitsIcEERSt13basic_ostreamIcT_ES5_PKc@plt>
+   0x00000000000008dc <+34>:	mov    %rax,%rdx      // RDX now has the "cout" object after it got the string
+   0x00000000000008df <+37>:	mov    0x2006ea(%rip),%rax        # 0x200fd0   // "endl" string terminator object
+   0x00000000000008e6 <+44>:	mov    %rax,%rsi      //  
+   0x00000000000008e9 <+47>:	mov    %rdx,%rdi      // the new cout is now the first argument again
+   0x00000000000008ec <+50>:	callq  0x780 <_ZNSolsEPFRSoS_E@plt>
+   0x00000000000008f1 <+55>:	mov    $0x0,%eax
+   0x00000000000008f6 <+60>:	leaveq 
+   0x00000000000008f7 <+61>:	retq   
+End of assembler dump.
+(gdb) quit
+
+Radare knows to do some name unmangling, restroring the printable type names:
+
+sergey@babylon1:~/RE-basics-W22/day6-src$ r2 basic
+[0x000007b0]> aaa
+[x] Analyze all flags starting with sym. and entry0 (aa)
+[x] Analyze len bytes of instructions for references (aar)
+[x] Analyze function calls (aac)
+[x] Use -AA or aaaa to perform additional experimental analysis.
+[x] Constructing a function name for fcn.* and sym.func.* functions (aan)
+
+[0x000007b0]> pdf @sym.main
+            ;-- main:
+/ (fcn) sym.main 62
+|   sym.main ();
+|           ; var int local_10h @ rbp-0x10
+|           ; var int local_4h @ rbp-0x4
+|              ; DATA XREF from 0x000007cd (entry0)
+|           0x000008ba      55             push rbp
+|           0x000008bb      4889e5         mov rbp, rsp
+|           0x000008be      4883ec10       sub rsp, 0x10
+|           0x000008c2      897dfc         mov dword [local_4h], edi
+|           0x000008c5      488975f0       mov qword [local_10h], rsi
+|           0x000008c9      488d35150100.  lea rsi, qword str.Hello_World ; 0x9e5 ; "Hello World!"
+|           0x000008d0      488d3d490720.  lea rdi, qword obj.std::cout ; 0x201020
+|           0x000008d7      e894feffff     call sym.std::basic_ostream_char_std::char_traits_char___std::operator___std::char_traits_char___std::basic_ostream_char_std::char_traits_char____charconst
+|           0x000008dc      4889c2         mov rdx, rax
+|           0x000008df      488b05ea0620.  mov rax, qword [reloc._ZSt4endlIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6__208] ; [0x200fd0:8]=0
+|           0x000008e6      4889c6         mov rsi, rax
+|           0x000008e9      4889d7         mov rdi, rdx
+|           0x000008ec      e88ffeffff     call sym.std::ostream::operator___std::ostream_____std::ostream
+|           0x000008f1      b800000000     mov eax, 0
+|           0x000008f6      c9             leave
+\           0x000008f7      c3             ret
+^D
+sergey@babylon1:~/RE-basics-W22/day6-src$
+
+We will continue with more C++ in the X-hour, covering the underlying
+mechanisms of virtual functions and inheritance.
+
+
