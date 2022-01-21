@@ -1,0 +1,677 @@
+
+In these notes, we take a look at how switches and dispatches are compiled.
+
+==================[ "The most important switch of all" ]==================
+
+At the kernel's syscall entry point, the kernel receives the syscall number (in RAX/EAX).
+You'd expect that it will use that number in either a gigantic switch statement, or as an
+index into an array of function points that point to the actual implementations of system
+calls. This is a common pattern of dispatching, so let's take a peek at what actually
+happens.
+
+In Linux, the code at the kernel entry point is written in assembly for each specific
+architecture. This code needs to deal with two contexts: the userland context (e.g., the
+current userland instruction pointer, the userland stack pointer, and the userland code
+address to return to after the syscall is done) and the kernel context, in which the
+kernel functions (written in C, and also following the C ABI) will be called, with their
+own separate stack and the rest of the CPU context that must be kept isolated from the
+userland. The assembly implementation serves as a glue between these two contexts.
+
+A few detailed discussion of the system call setup and flow can be found in
+https://0xax.gitbooks.io/linux-insides/content/SysCall/linux-syscall-2.html
+We only want to see a tiny bit of it, namely where the syscall number in EAX/RAX is
+acted on, for the x86_64 architecture.
+
+So we look in
+https://github.com/torvalds/linux/blob/16f73eb02d7e1765ccab3d2018e0bd98eb93d973/arch/x86/entry/entry_64.S
+and there it is, around line 203 (start looking from line 181).
+
+  call *sys_call_table(, %rax, 8)
+
+This is a call to the address computed as (RAX*8 + sys_call_table), where sys_call_table is an array
+of 8-byte function pointer addresses. Note that the more general form of Intel indirect memory
+addressing is  OFFSET(R1, R2, N) , where N is a small multiple of 2 and the computed address
+is (R1 + R2*N + OFFSET). You can imagine that either OFFSET or R1 are the base address of an array
+of entities of sizes 1 or a power of 2, and R2 is an index into that array. You could also
+imagine that OFFSET is an offset into a struct, and R1 is the base address of an array of such structs.
+
+Note that lines 190/193 compare the passed system call number with the maximum index in the
+table, and will jump out (line 195) if it's not in the valid range. We totally don't want
+the indirect call to go to some unintended location pointed to by some bytes beyond the sys_call_table!
+
+You can see the same pattern for older 32-bit code (which I saved from a much older, simpler kernel):
+https://www.cs.dartmouth.edu/~sergey/cs258/rootkits/entry.S 
+(Look at lines 224--227; you see "4" rather that "8" because pointers were 4 bytes in 32-bit times).
+
+Note that this is just the first check of arguments passed into the syscall. Each syscall
+should then be checking its own arguments carefully, especially ioctl() and setsockopt()
+syscalls that take buffers of byte commands. These checks are the main line of defense
+for the kernel against privilege escalation exploits via inputs from attacker-controlled userland.
+
+When the kernel doesn't do the careful checking, its memory can be corrupted. The syszkaller
+projects automatically runs "fuzzing" tests that probe the kernel by sending it data/arguments
+that it might not expect, randomly generated with heuristics to try to trigger a missing check.
+The syszkaller triggers a kernel crash it automatically files a bug---and it's been quite
+successful (see https://lore.kernel.org/dri-devel/20200710103910.GD1203263@kroah.com/ and
+the response https://twitter.com/dvyukov/status/1281913109247152128 from the syszkaller lead at Google.)
+
+=========================[ Basic switch ]=============================
+
+A simple, short switch is likely to compile to a mix of compares and jumps:
+
+sergey@babylon1:~$ cat basic_switch.c 
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char **argv)
+{
+  if ( argc != 2 ) {
+    exit(0);
+  }
+
+  switch(argv[1][0]) {
+    case 'A':
+      printf("You pass\n");
+      break;
+   case 'B':
+      printf("Yep, still pass\n");
+      break;
+   case 'C':
+      printf("I guess, but really?\n");
+      break;
+   default:
+      printf("Nope\n");
+      break;
+  }
+
+  return 0;
+}
+
+sergey@babylon1:~$ gcc -o sw basic_switch.c 
+
+sergey@babylon1:~$ gdb sw
+GNU gdb (Ubuntu 8.1.1-0ubuntu1) 8.1.1
+<skipped>
+
+(gdb) disas main
+Dump of assembler code for function main:
+   0x000000000000068a <+0>:	push   %rbp
+   0x000000000000068b <+1>:	mov    %rsp,%rbp
+   0x000000000000068e <+4>:	sub    $0x10,%rsp
+   0x0000000000000692 <+8>:	mov    %edi,-0x4(%rbp)   // argc
+   0x0000000000000695 <+11>:	mov    %rsi,-0x10(%rbp)  // argv 
+   0x0000000000000699 <+15>:	cmpl   $0x2,-0x4(%rbp)   // is argc == 2 ?
+   0x000000000000069d <+19>:	je     0x6a9 <main+31>
+   0x000000000000069f <+21>:	mov    $0x0,%edi         // head to exit() if not
+   0x00000000000006a4 <+26>:	callq  0x560 <exit@plt>
+   0x00000000000006a9 <+31>:	mov    -0x10(%rbp),%rax  // get argv into RAX 
+   0x00000000000006ad <+35>:	add    $0x8,%rax         // argv is an array of 8-byte pointers, 
+   0x00000000000006b1 <+39>:	mov    (%rax),%rax       //  so this gets us argv[1]
+   0x00000000000006b4 <+42>:	movzbl (%rax),%eax       // and the first character of the string argv[1] points to, zero-extended to 32 bits
+
+    // also note that argv is a char**, so we expect and find double indirection, two (%rax) in a row
+
+   0x00000000000006b7 <+45>:	movsbl %al,%eax          // actually scratch that, sign-extended from the lowest byte part of EAX; argv points to _signed_ characters (char**), so this makes sense
+   0x00000000000006ba <+48>:	cmp    $0x42,%eax        // 32 bit-wide compare with 'B'
+   0x00000000000006bd <+51>:	je     0x6d7 <main+77>   //   jump on exact match
+   0x00000000000006bf <+53>:	cmp    $0x43,%eax        // and 'C'
+   0x00000000000006c2 <+56>:	je     0x6e5 <main+91>   //   jump on exact match 
+   0x00000000000006c4 <+58>:	cmp    $0x41,%eax        // and 'A'
+   0x00000000000006c7 <+61>:	jne    0x6f3 <main+105>  //   jump if NOT an exact match; default case 
+   0x00000000000006c9 <+63>:	lea    0xc4(%rip),%rdi        # 0x794  
+   0x00000000000006d0 <+70>:	callq  0x550 <puts@plt>
+   0x00000000000006d5 <+75>:	jmp    0x700 <main+118>
+   0x00000000000006d7 <+77>:	lea    0xbf(%rip),%rdi        # 0x79d
+   0x00000000000006de <+84>:	callq  0x550 <puts@plt>
+   0x00000000000006e3 <+89>:	jmp    0x700 <main+118>
+   0x00000000000006e5 <+91>:	lea    0xc1(%rip),%rdi        # 0x7ad
+   0x00000000000006ec <+98>:	callq  0x550 <puts@plt>
+---Type <return> to continue, or q <return> to quit---
+   0x00000000000006f1 <+103>:	jmp    0x700 <main+118>
+   0x00000000000006f3 <+105>:	lea    0xc8(%rip),%rdi        # 0x7c2   // default case
+   0x00000000000006fa <+112>:	callq  0x550 <puts@plt>
+   0x00000000000006ff <+117>:	nop
+   0x0000000000000700 <+118>:	mov    $0x0,%eax
+   0x0000000000000705 <+123>:	leaveq 
+   0x0000000000000706 <+124>:	retq   
+End of assembler dump.
+(gdb) quit
+
+Radare will draw a better picture of the switch case jumps and their targets:
+
+sergey@babylon1:~$ r2 sw
+[0x00000580]> aaa
+[x] Analyze all flags starting with sym. and entry0 (aa)
+[x] Analyze len bytes of instructions for references (aar)
+[x] Analyze function calls (aac)
+[x] Use -AA or aaaa to perform additional experimental analysis.
+[x] Constructing a function name for fcn.* and sym.func.* functions (aan)
+
+[0x00000580]> pd 100 @sym.main
+            ;-- main:
+/ (fcn) sym.main 125
+|   sym.main ();
+|           ; var int local_10h @ rbp-0x10
+|           ; var int local_4h @ rbp-0x4
+|              ; DATA XREF from 0x0000059d (entry0)
+|           0x0000068a      55             push rbp
+|           0x0000068b      4889e5         mov rbp, rsp
+|           0x0000068e      4883ec10       sub rsp, 0x10
+|           0x00000692      897dfc         mov dword [local_4h], edi
+|           0x00000695      488975f0       mov qword [local_10h], rsi
+|           0x00000699      837dfc02       cmp dword [local_4h], 2     ; [0x2:4]=0x102464c
+|       ,=< 0x0000069d      740a           je 0x6a9
+|       |   0x0000069f      bf00000000     mov edi, 0
+|       |   0x000006a4      e8b7feffff     call sym.imp.exit           ; void exit(int status)
+|       |      ; JMP XREF from 0x0000069d (sym.main)
+|       `-> 0x000006a9      488b45f0       mov rax, qword [local_10h]
+|           0x000006ad      4883c008       add rax, 8
+|           0x000006b1      488b00         mov rax, qword [rax]
+|           0x000006b4      0fb600         movzx eax, byte [rax]
+|           0x000006b7      0fbec0         movsx eax, al
+|           0x000006ba      83f842         cmp eax, 0x42               ; 'B'
+|       ,=< 0x000006bd      7418           je 0x6d7
+|       |   0x000006bf      83f843         cmp eax, 0x43               ; 'C'
+|      ,==< 0x000006c2      7421           je 0x6e5
+|      ||   0x000006c4      83f841         cmp eax, 0x41               ; 'A'
+|     ,===< 0x000006c7      752a           jne 0x6f3
+|     |||   0x000006c9      488d3dc40000.  lea rdi, qword str.You_pass ; 0x794 ; "You pass"
+|     |||   0x000006d0      e87bfeffff     call sym.imp.puts           ; int puts(const char *s)
+|    ,====< 0x000006d5      eb29           jmp 0x700
+|    ||||      ; JMP XREF from 0x000006bd (sym.main)
+|    |||`-> 0x000006d7      488d3dbf0000.  lea rdi, qword str.Yep__still_pass ; 0x79d ; "Yep, still pass"
+|    |||    0x000006de      e86dfeffff     call sym.imp.puts           ; int puts(const char *s)
+|    |||,=< 0x000006e3      eb1b           jmp 0x700
+|    ||||      ; JMP XREF from 0x000006c2 (sym.main)
+|    ||`--> 0x000006e5      488d3dc10000.  lea rdi, qword str.I_guess__but_really ; 0x7ad ; "I guess, but really?"
+|    || |   0x000006ec      e85ffeffff     call sym.imp.puts           ; int puts(const char *s)
+|    ||,==< 0x000006f1      eb0d           jmp 0x700
+|    ||||      ; JMP XREF from 0x000006c7 (sym.main)
+|    |`---> 0x000006f3      488d3dc80000.  lea rdi, qword str.Nope     ; 0x7c2 ; "Nope"
+|    | ||   0x000006fa      e851feffff     call sym.imp.puts           ; int puts(const char *s)
+|    | ||   0x000006ff      90             nop
+|    | ||      ; JMP XREF from 0x000006e3 (sym.main)
+|    | ||      ; JMP XREF from 0x000006f1 (sym.main)
+|    | ||      ; JMP XREF from 0x000006d5 (sym.main)
+|    `-``-> 0x00000700      b800000000     mov eax, 0
+|           0x00000705      c9             leave
+\           0x00000706      c3             ret
+            0x00000707      660f1f840000.  nop word [rax + rax]
+
+   <skipped>
+
+            ;-- section..rodata:
+            ;-- _IO_stdin_used:
+            0x00000790      0100           add dword [rax], eax        ; [16] --r-- section size 55 named .rodata
+            0x00000792      0200           add al, byte [rax]
+            ;-- str.You_pass:
+               ; DATA XREF from 0x000006c9 (sym.main)
+            0x00000794     .string "You pass" ; len=9
+      |||   ;-- str.Yep__still_pass:
+      |||      ; DATA XREF from 0x000006d7 (sym.main)
+      |||   0x0000079d     .string "Yep, still pass" ; len=16
+     ||||   ;-- str.I_guess__but_really:
+     ||||      ; DATA XREF from 0x000006e5 (sym.main)
+     ||||   0x000007ad     .string "I guess, but really?" ; len=21
+  |||||||   ;-- str.Nope:
+  |||||||      ; DATA XREF from 0x000006f3 (sym.main)
+  |||||||   0x000007c2     .string "Nope" ; len=5
+  |||||||   ;-- section_end..rodata:
+
+<skipped>
+
+Another useful Radare command, which depends on the automated analysis ('aaa') done above.
+
+[0x00000580]> pdf @sym.main
+            ;-- main:
+/ (fcn) sym.main 125
+|   sym.main ();
+|           ; var int local_10h @ rbp-0x10
+|           ; var int local_4h @ rbp-0x4
+|              ; DATA XREF from 0x0000059d (entry0)
+|           0x0000068a      55             push rbp
+|           0x0000068b      4889e5         mov rbp, rsp
+|           0x0000068e      4883ec10       sub rsp, 0x10
+|           0x00000692      897dfc         mov dword [local_4h], edi
+|           0x00000695      488975f0       mov qword [local_10h], rsi
+|           0x00000699      837dfc02       cmp dword [local_4h], 2     ; [0x2:4]=0x102464c
+|       ,=< 0x0000069d      740a           je 0x6a9
+|       |   0x0000069f      bf00000000     mov edi, 0
+|       |   0x000006a4      e8b7feffff     call sym.imp.exit           ; void exit(int status)
+|       |      ; JMP XREF from 0x0000069d (sym.main)
+|       `-> 0x000006a9      488b45f0       mov rax, qword [local_10h]
+|           0x000006ad      4883c008       add rax, 8
+|           0x000006b1      488b00         mov rax, qword [rax]
+|           0x000006b4      0fb600         movzx eax, byte [rax]
+|           0x000006b7      0fbec0         movsx eax, al
+|           0x000006ba      83f842         cmp eax, 0x42               ; 'B'
+|       ,=< 0x000006bd      7418           je 0x6d7
+|       |   0x000006bf      83f843         cmp eax, 0x43               ; 'C'
+|      ,==< 0x000006c2      7421           je 0x6e5
+|      ||   0x000006c4      83f841         cmp eax, 0x41               ; 'A'
+|     ,===< 0x000006c7      752a           jne 0x6f3
+|     |||   0x000006c9      488d3dc40000.  lea rdi, qword str.You_pass ; 0x794 ; "You pass"
+|     |||   0x000006d0      e87bfeffff     call sym.imp.puts           ; int puts(const char *s)
+|    ,====< 0x000006d5      eb29           jmp 0x700
+|    ||||      ; JMP XREF from 0x000006bd (sym.main)
+|    |||`-> 0x000006d7      488d3dbf0000.  lea rdi, qword str.Yep__still_pass ; 0x79d ; "Yep, still pass"
+|    |||    0x000006de      e86dfeffff     call sym.imp.puts           ; int puts(const char *s)
+|    |||,=< 0x000006e3      eb1b           jmp 0x700
+|    ||||      ; JMP XREF from 0x000006c2 (sym.main)
+|    ||`--> 0x000006e5      488d3dc10000.  lea rdi, qword str.I_guess__but_really ; 0x7ad ; "I guess, but really?"
+|    || |   0x000006ec      e85ffeffff     call sym.imp.puts           ; int puts(const char *s)
+|    ||,==< 0x000006f1      eb0d           jmp 0x700
+|    ||||      ; JMP XREF from 0x000006c7 (sym.main)
+|    |`---> 0x000006f3      488d3dc80000.  lea rdi, qword str.Nope     ; 0x7c2 ; "Nope"
+|    | ||   0x000006fa      e851feffff     call sym.imp.puts           ; int puts(const char *s)
+|    | ||   0x000006ff      90             nop
+|    | ||      ; JMP XREF from 0x000006e3 (sym.main)
+|    | ||      ; JMP XREF from 0x000006f1 (sym.main)
+|    | ||      ; JMP XREF from 0x000006d5 (sym.main)
+|    `-``-> 0x00000700      b800000000     mov eax, 0
+|           0x00000705      c9             leave
+\           0x00000706      c3             ret
+[0x00000580]> 
+
+So far, switches seem boring, a tangle of direct compares and direct jumps. But the compiler can also
+convert them into an indirect jumps, through a jump table indexed by a computed switch variable.
+
+Consider the following example:
+
+sergey@babylon1:~$ cat jump_switch.c 
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(int argc, char**argv)
+{
+  if ( argc != 2 ) {
+    exit(0);
+  }
+
+  switch (argv[1][0]) {
+    case 'A':
+      printf("You entered 'A'\n");
+      break;
+    case 'B':
+      printf("You entered 'B'\n");
+      break;
+    case 'C':
+      printf("You entered 'C'\n");
+      break;
+    case 'D':
+      printf("You entered 'D'\n");
+      break;
+    case 'E':
+      printf("You entered 'E'\n");
+      break;
+    case 'F':
+      printf("You entered 'F'\n");
+      break;
+    case 'G':
+      printf("You entered 'G'\n");
+      break;
+    case 'H':
+      printf("You entered 'H'\n");
+      break;
+    case 'I':
+      printf("You entered 'I'\n");
+      break;
+    case 'J':
+      printf("You entered 'J'\n");
+      break;
+    case 'K':
+      printf("You entered 'K'\n");
+      break;
+    case 'L':
+      printf("You entered 'L'\n");
+      break;
+    case 'M':
+      printf("You entered 'M'\n");
+      break;
+    case 'N':
+      printf("You entered 'N'\n");
+      break;
+    case 'O':
+      printf("You entered 'O'\n");
+      break;
+    case 'P':
+      printf("You entered 'P'\n");
+      break;
+    case 'Q':
+      printf("You entered 'Q'\n");
+      break;
+    case 'R':
+      printf("You entered 'R'\n");
+      break;
+    case 'S':
+      printf("You entered 'S'\n");
+      break;
+    case 'T':
+      printf("You entered 'T'\n");
+      break;
+    case 'U':
+      printf("You entered 'U'\n");
+      break;
+    case 'V':
+      printf("You entered 'V'\n");
+      break;
+    default:
+      printf("Had to be different\n");
+      break;
+  }
+
+  return 0;
+}
+sergey@babylon1:~$ gcc -o jsw jump_switch.c 
+sergey@babylon1:~$ gdb jsw
+GNU gdb (Ubuntu 8.1.1-0ubuntu1) 8.1.1
+
+<skipped>
+
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from jsw...(no debugging symbols found)...done.
+(gdb) disas main
+Dump of assembler code for function main:
+   0x000000000000068a <+0>:	push   %rbp
+   0x000000000000068b <+1>:	mov    %rsp,%rbp
+   0x000000000000068e <+4>:	sub    $0x10,%rsp
+   0x0000000000000692 <+8>:	mov    %edi,-0x4(%rbp)
+   0x0000000000000695 <+11>:	mov    %rsi,-0x10(%rbp)
+   0x0000000000000699 <+15>:	cmpl   $0x2,-0x4(%rbp)
+   0x000000000000069d <+19>:	je     0x6a9 <main+31>
+   0x000000000000069f <+21>:	mov    $0x0,%edi
+   0x00000000000006a4 <+26>:	callq  0x560 <exit@plt>
+   0x00000000000006a9 <+31>:	mov    -0x10(%rbp),%rax
+   0x00000000000006ad <+35>:	add    $0x8,%rax
+   0x00000000000006b1 <+39>:	mov    (%rax),%rax
+   0x00000000000006b4 <+42>:	movzbl (%rax),%eax
+   0x00000000000006b7 <+45>:	movsbl %al,%eax       //  up to here, the same as before
+   0x00000000000006ba <+48>:	sub    $0x41,%eax     //  So EAX is going to act as an index 
+   0x00000000000006bd <+51>:	cmp    $0x15,%eax     //    into a table with 22 entries, 0..0x15
+   0x00000000000006c0 <+54>:	ja     0x844 <main+442>  // jump away to the default case
+   0x00000000000006c6 <+60>:	mov    %eax,%eax         // likely a NOP
+   0x00000000000006c8 <+62>:	lea    0x0(,%rax,4),%rdx     // this multiplies RAX*4 and stores into RDX
+
+     // 4? what is 4 doing here? The entries of the jump table will be 4 byte long.
+     // A bit excessive for the enum type in this switch, but that's what the compiler chose.
+
+   0x00000000000006d0 <+70>:	lea    0x381(%rip),%rax        # 0xa58   // base of jump table
+   0x00000000000006d7 <+77>:	mov    (%rdx,%rax,1),%eax                // the 4-byte entry of the jump table
+                                                                         //  is fetched into EAX 
+   0x00000000000006da <+80>:	movslq %eax,%rdx                         // and sign-extended into RDX
+   0x00000000000006dd <+83>:	lea    0x374(%rip),%rax        # 0xa58   // Jump table base address is loaded back into RAX
+   0x00000000000006e4 <+90>:	add    %rdx,%rax                         //  ... added to the jump table entry 
+   0x00000000000006e7 <+93>:	jmpq   *%rax                             //  and we jump there. That's our case action
+
+   // If this seems redundant, it sure is! Look at the same code compiled with gcc -O2 optimization
+
+   0x00000000000006e9 <+95>:	lea    0x1f4(%rip),%rdi        # 0x8e4   // first case
+   0x00000000000006f0 <+102>:	callq  0x550 <puts@plt>
+   0x00000000000006f5 <+107>:	jmpq   0x851 <main+455>
+---Type <return> to continue, or q <return> to quit---
+   0x00000000000006fa <+112>:	lea    0x1f3(%rip),%rdi        # 0x8f4   // second case
+   0x0000000000000701 <+119>:	callq  0x550 <puts@plt>
+   0x0000000000000706 <+124>:	jmpq   0x851 <main+455>
+   0x000000000000070b <+129>:	lea    0x1f2(%rip),%rdi        # 0x904   // another case
+   0x0000000000000712 <+136>:	callq  0x550 <puts@plt>
+   0x0000000000000717 <+141>:	jmpq   0x851 <main+455>
+   0x000000000000071c <+146>:	lea    0x1f1(%rip),%rdi        # 0x914   // and so on
+   0x0000000000000723 <+153>:	callq  0x550 <puts@plt>
+   0x0000000000000728 <+158>:	jmpq   0x851 <main+455>
+   0x000000000000072d <+163>:	lea    0x1f0(%rip),%rdi        # 0x924
+   0x0000000000000734 <+170>:	callq  0x550 <puts@plt>
+   0x0000000000000739 <+175>:	jmpq   0x851 <main+455>
+   0x000000000000073e <+180>:	lea    0x1ef(%rip),%rdi        # 0x934
+   0x0000000000000745 <+187>:	callq  0x550 <puts@plt>
+   0x000000000000074a <+192>:	jmpq   0x851 <main+455>
+   0x000000000000074f <+197>:	lea    0x1ee(%rip),%rdi        # 0x944
+   0x0000000000000756 <+204>:	callq  0x550 <puts@plt>
+   0x000000000000075b <+209>:	jmpq   0x851 <main+455>
+   0x0000000000000760 <+214>:	lea    0x1ed(%rip),%rdi        # 0x954
+   0x0000000000000767 <+221>:	callq  0x550 <puts@plt>
+   0x000000000000076c <+226>:	jmpq   0x851 <main+455>
+   0x0000000000000771 <+231>:	lea    0x1ec(%rip),%rdi        # 0x964
+   0x0000000000000778 <+238>:	callq  0x550 <puts@plt>
+   0x000000000000077d <+243>:	jmpq   0x851 <main+455>
+   0x0000000000000782 <+248>:	lea    0x1eb(%rip),%rdi        # 0x974
+   0x0000000000000789 <+255>:	callq  0x550 <puts@plt>
+   0x000000000000078e <+260>:	jmpq   0x851 <main+455>
+   0x0000000000000793 <+265>:	lea    0x1ea(%rip),%rdi        # 0x984
+   0x000000000000079a <+272>:	callq  0x550 <puts@plt>
+---Type <return> to continue, or q <return> to quit---
+   0x000000000000079f <+277>:	jmpq   0x851 <main+455>
+   0x00000000000007a4 <+282>:	lea    0x1e9(%rip),%rdi        # 0x994
+   0x00000000000007ab <+289>:	callq  0x550 <puts@plt>
+   0x00000000000007b0 <+294>:	jmpq   0x851 <main+455>
+   0x00000000000007b5 <+299>:	lea    0x1e8(%rip),%rdi        # 0x9a4
+   0x00000000000007bc <+306>:	callq  0x550 <puts@plt>
+   0x00000000000007c1 <+311>:	jmpq   0x851 <main+455>
+   0x00000000000007c6 <+316>:	lea    0x1e7(%rip),%rdi        # 0x9b4
+   0x00000000000007cd <+323>:	callq  0x550 <puts@plt>
+   0x00000000000007d2 <+328>:	jmp    0x851 <main+455>
+   0x00000000000007d4 <+330>:	lea    0x1e9(%rip),%rdi        # 0x9c4
+   0x00000000000007db <+337>:	callq  0x550 <puts@plt>
+   0x00000000000007e0 <+342>:	jmp    0x851 <main+455>
+   0x00000000000007e2 <+344>:	lea    0x1eb(%rip),%rdi        # 0x9d4
+   0x00000000000007e9 <+351>:	callq  0x550 <puts@plt>
+   0x00000000000007ee <+356>:	jmp    0x851 <main+455>
+   0x00000000000007f0 <+358>:	lea    0x1ed(%rip),%rdi        # 0x9e4
+   0x00000000000007f7 <+365>:	callq  0x550 <puts@plt>
+   0x00000000000007fc <+370>:	jmp    0x851 <main+455>
+   0x00000000000007fe <+372>:	lea    0x1ef(%rip),%rdi        # 0x9f4
+   0x0000000000000805 <+379>:	callq  0x550 <puts@plt>
+   0x000000000000080a <+384>:	jmp    0x851 <main+455>
+   0x000000000000080c <+386>:	lea    0x1f1(%rip),%rdi        # 0xa04
+   0x0000000000000813 <+393>:	callq  0x550 <puts@plt>
+   0x0000000000000818 <+398>:	jmp    0x851 <main+455>
+   0x000000000000081a <+400>:	lea    0x1f3(%rip),%rdi        # 0xa14
+   0x0000000000000821 <+407>:	callq  0x550 <puts@plt>
+   0x0000000000000826 <+412>:	jmp    0x851 <main+455>
+   0x0000000000000828 <+414>:	lea    0x1f5(%rip),%rdi        # 0xa24
+---Type <return> to continue, or q <return> to quit---q
+Quit
+
+Let's see this jump table in action.
+
+(gdb) b main
+Breakpoint 1 at 0x68e
+(gdb) r
+Starting program: /thayerfs/home/sergey/jsw 
+
+Breakpoint 1, 0x000055555555468e in main ()
+
+Now our process is loaded, so we see real addresses in disassembly.
+
+(gdb) disas main
+Dump of assembler code for function main:
+   0x000055555555468a <+0>:	push   %rbp
+   0x000055555555468b <+1>:	mov    %rsp,%rbp
+=> 0x000055555555468e <+4>:	sub    $0x10,%rsp
+   0x0000555555554692 <+8>:	mov    %edi,-0x4(%rbp)
+   0x0000555555554695 <+11>:	mov    %rsi,-0x10(%rbp)
+   0x0000555555554699 <+15>:	cmpl   $0x2,-0x4(%rbp)
+   0x000055555555469d <+19>:	je     0x5555555546a9 <main+31>
+   0x000055555555469f <+21>:	mov    $0x0,%edi
+   0x00005555555546a4 <+26>:	callq  0x555555554560 <exit@plt>
+   0x00005555555546a9 <+31>:	mov    -0x10(%rbp),%rax
+   0x00005555555546ad <+35>:	add    $0x8,%rax
+   0x00005555555546b1 <+39>:	mov    (%rax),%rax
+   0x00005555555546b4 <+42>:	movzbl (%rax),%eax
+   0x00005555555546b7 <+45>:	movsbl %al,%eax
+   0x00005555555546ba <+48>:	sub    $0x41,%eax
+   0x00005555555546bd <+51>:	cmp    $0x15,%eax
+   0x00005555555546c0 <+54>:	ja     0x555555554844 <main+442>
+   0x00005555555546c6 <+60>:	mov    %eax,%eax
+   0x00005555555546c8 <+62>:	lea    0x0(,%rax,4),%rdx
+   0x00005555555546d0 <+70>:	lea    0x381(%rip),%rax        # 0x555555554a58
+   0x00005555555546d7 <+77>:	mov    (%rdx,%rax,1),%eax
+   0x00005555555546da <+80>:	movslq %eax,%rdx
+   0x00005555555546dd <+83>:	lea    0x374(%rip),%rax        # 0x555555554a58
+   0x00005555555546e4 <+90>:	add    %rdx,%rax
+   0x00005555555546e7 <+93>:	jmpq   *%rax
+   0x00005555555546e9 <+95>:	lea    0x1f4(%rip),%rdi        # 0x5555555548e4
+   0x00005555555546f0 <+102>:	callq  0x555555554550 <puts@plt>
+   0x00005555555546f5 <+107>:	jmpq   0x555555554851 <main+455>
+---Type <return> to continue, or q <return> to quit---q
+Quit
+
+Let's look at the jump offset table. These are the 4-byte offsets: 
+
+(gdb) x/10w 0x555555554a58
+0x555555554a58:	-879	-862	-845	-828
+0x555555554a68:	-811	-794	-777	-760
+0x555555554a78:	-743	-726
+
+In hex (w stands for 4 bytes; see "help x")
+
+(gdb) x/10xw 0x555555554a58
+0x555555554a58:	0xfffffc91	0xfffffca2	0xfffffcb3	0xfffffcc4
+0x555555554a68:	0xfffffcd5	0xfffffce6	0xfffffcf7	0xfffffd08
+0x555555554a78:	0xfffffd19	0xfffffd2a
+
+Recall that these 4-byte offsets are sign-extended into 8-byte offsets before being
+added to the table base, with movslq. Here, I sign-extend them manually:
+
+(gdb) p/a 0x555555554a58 + 0xfffffffffffffc91
+$1 = 0x5555555546e9 <main+95>
+
+So, what's at that address?
+
+(gdb) x/3i 0x5555555546e9
+   0x5555555546e9 <main+95>:	lea    0x1f4(%rip),%rdi        # 0x5555555548e4
+   0x5555555546f0 <main+102>:	callq  0x555555554550 <puts@plt>
+   0x5555555546f5 <main+107>:	jmpq   0x555555554851 <main+455>
+
+It's the case action for 'A':
+
+(gdb) x/s 0x5555555548e4
+0x5555555548e4:	"You entered 'A'"
+
+Let's do another one:
+
+(gdb) p/a 0x555555554a58 + 0xfffffffffffffca2
+$2 = 0x5555555546fa <main+112>
+(gdb) x/3i 0x5555555546fa
+   0x5555555546fa <main+112>:	lea    0x1f3(%rip),%rdi        # 0x5555555548f4
+   0x555555554701 <main+119>:	callq  0x555555554550 <puts@plt>
+   0x555555554706 <main+124>:	jmpq   0x555555554851 <main+455>
+(gdb) x/s 0x5555555548f4
+0x5555555548f4:	"You entered 'B'"
+
+.. and so on
+
+GDB treats hitting Enter at the prompt as repeating the previous command, sometimes
+with an automatic adjustment of its arguments. That way one can step through memory
+quickly.
+
+(gdb) x/s 0x5555555548e4
+0x5555555548e4:	"You entered 'A'"
+(gdb) 
+0x5555555548f4:	"You entered 'B'"
+(gdb) 
+0x555555554904:	"You entered 'C'"
+(gdb) 
+0x555555554914:	"You entered 'D'"
+(gdb) 
+0x555555554924:	"You entered 'E'"
+(gdb) 
+0x555555554934:	"You entered 'F'"
+
+And there we have it: a switch compiled into an indirect jump based on an index, with
+a jump table placed in .rodata , next to the strings for messages to print.
+
+If you run r2 on this, you'll see that Radare tries to disassemble the jump tables of
+offsets in .rodata. It does not succeed, of course, because these are offsets, not
+instructions. It could have guessed this heuristically, as it guessed the messages were strings,
+but it apparently lacks that heuristic.
+
+d10073q@babylon1:~/RE-basics-W22/day6-src$ r2 jsw 
+[0x00000580]> aaa
+[x] Analyze all flags starting with sym. and entry0 (aa)
+[x] Analyze len bytes of instructions for references (aar)
+[x] Analyze function calls (aac)
+[x] Use -AA or aaaa to perform additional experimental analysis.
+[x] Constructing a function name for fcn.* and sym.func.* functions (aan)
+
+[0x00000580]> pd 200 @sym.main
+
+<skipped>  
+
+// Let's get straight to the .rodata section 
+
+[0x00000580]> iS | grep rodata
+16 0x000008e0   464 0x000008e0   464 --r-- .rodata
+[0x00000580]> 
+
+[0x00000580]> pd @0x000008e0
+            ;-- section..rodata:
+            ;-- _IO_stdin_used:
+            0x000008e0      0100           add dword [rax], eax        ; [16] --r-- section size 464 named .rodata
+            0x000008e2      0200           add al, byte [rax]
+            ;-- str.You_entered__A:
+               ; DATA XREF from 0x000006e9 (main + 95)
+            0x000008e4     .string "You entered 'A'" ; len=16
+      |||   ;-- str.You_entered__B:
+
+  <skipped>
+
+            ;-- str.You_entered__U:
+               ; DATA XREF from 0x00000828 (main + 414)
+            0x00000a24     .string "You entered 'U'" ; len=16
+            ;-- str.You_entered__V:
+               ; DATA XREF from 0x00000836 (main + 428)
+            0x00000a34     .string "You entered 'V'" ; len=16
+            ;-- str.Had_to_be_different:
+               ; DATA XREF from 0x00000844 (main + 442)
+            0x00000a44     .string "Had to be different" ; len=20
+               ; JMP XREF from 0x00000a36 (str.You_entered__V + 2)
+               ; JMP XREF from 0x00000a56 (str.Had_to_be_different + 18)
+               ; DATA XREF from 0x000006d0 (sym.main)
+               ; DATA XREF from 0x000006dd (sym.main) 
+            0x00000a58      91             xchg eax, ecx    //// <----- This doesn't disassemble well :)       
+            0x00000a59      fc             cld
+            0x00000a5a      ff             invalid
+            0x00000a5b      ffa2fcffffb3   jmp qword [rdx - 0x4c000004]
+               ; JMP XREF from 0x000009fa (str.You_entered__R + 6)
+            0x00000a61      fc             cld
+            0x00000a62      ff             invalid
+               ; JMP XREF from 0x000009fc (str.You_entered__R + 8)
+            0x00000a63      ffc4           inc esp
+            0x00000a65      fc             cld
+            0x00000a66      ff             invalid
+            0x00000a67      ffd5           call rbp
+            0x00000a69      fc             cld
+            0x00000a6a      ff             invalid
+            0x00000a6b      ffe6           jmp rsi
+            0x00000a6d      fc             cld
+            0x00000a6e      ff             invalid
+            0x00000a6f      fff7           push rdi
+               ; JMP XREF from 0x00000a0a (str.You_entered__S + 6)
+            0x00000a71      fc             cld
+            0x00000a72      ff             invalid
+               ; JMP XREF from 0x00000a0c (str.You_entered__S + 8)
+            0x00000a73      ff08           dec dword [rax]
+            0x00000a75      fd             std
+            0x00000a76      ff             invalid
+            0x00000a77      ff19           lcall [rcx]
+            0x00000a79      fd             std
+            0x00000a7a      ff             invalid
+            0x00000a7b      ff2a           ljmp [rdx]
+            0x00000a7d      fd             std
+            0x00000a7e      ff             invalid
+            0x00000a7f      ff             invalid
+            0x00000a80      3bfd           cmp edi, ebp
+            0x00000a82      ff             invalid
+               ; JMP XREF from 0x00000a1c (str.You_entered__T + 8)
+            0x00000a83      ff4cfdff       dec dword [rbp + rdi*8 - 1]
+            0x00000a87      ff5dfd         lcall [rbp - 3]
+            0x00000a8a      ff             invalid
+            0x00000a8b      ff6efd         ljmp [rsi - 3]
+            0x00000a8e      ff             invalid
+               ; JMP XREF from 0x00000a90 (str.Had_to_be_different + 76)
+            0x00000a8f      ff             invalid
+            0x00000a90      7cfd           jl 0xa8f
+            0x00000a92      ff             invalid
+               ; JMP XREF from 0x00000a2c (str.You_entered__U + 8)
+            0x00000a93      ff8afdffff98   dec dword [rdx - 0x67000003]
+
