@@ -42,5 +42,11 @@ Notes from the X-hour: <a href="https://github.com/sergeybratus/RE-basics-W22/bl
 
 Day 5: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day5-src/sign-extension-and-syscalls.txt">Signed arithmetic and basic syscalls</a>, <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day5-src/shellcode.txt">simple shellcode</a>, with <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day5-src">examples</a>. 
 
+Videos from Day 5: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/videos/CS69.16:169%20Day%205%20Part%201.mp4">Part 1</a> and <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/videos/CS69.16:169%20Day%205%20Part%202.mp4">Part 2</a>.
 
+<hr>
 
+Day 6: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day6-src/on-switches.txt">Notes on switches</a> and a quick <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day6-src/starting-on-Cplusplus.txt">Introduction to C++ compilation</a>. See also
+  <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day6-src">examples/</a>
+
+<hr>
