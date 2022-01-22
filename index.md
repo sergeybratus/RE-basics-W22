@@ -50,3 +50,7 @@ Day 6: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day6-src
   <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day6-src">examples/</a>
 
 <hr>
+
+X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day6-Xhour-slides.pdf">slides</a> (look for the recorded video link in email).
+
+<hr>
