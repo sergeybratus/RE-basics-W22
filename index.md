@@ -54,3 +54,9 @@ Day 6: <a href="https://github.com/sergeybratus/RE-basics-W22/blob/main/day6-src
 X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/day6-Xhour-slides.pdf">slides</a> (look for the recorded video link in email).
 
 <hr>
+
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Cplusplus/inheritance-notes.txt">Notes on C++ inheritance implementation and artifacts</a>.
+
+<hr>
+
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Travis-Goodspeed-guest-lecture-week4-tues.pdf">Travis Goodspeed guest lecture</a>.
