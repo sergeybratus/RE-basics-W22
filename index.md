@@ -60,3 +60,6 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 <hr>
 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Travis-Goodspeed-guest-lecture-week4-tues.pdf">Travis Goodspeed guest lecture</a>.
+
+<p><a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/loading-raw-binary-into-ghidra.txt">Notes on loading raw binaries in Ghidra</a> (the lost part of the X-hour video).
+
