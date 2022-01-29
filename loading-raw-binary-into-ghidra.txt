@@ -1,0 +1,65 @@
+
+================[ Loading a raw binary image into Ghidra ]====================
+
+Reversing binary firmware images retrieved from a device involves a few additional steps
+compared to reversing applications. Unlike firmware, applications carry metadata that
+identifies the instruction set, the intended loading addresses for the various memory
+segments, the entry point where execution begins, and so on, all part of the ELF format
+(for Unix), PE (for Windows), and Mach-O (for MacOS) headers.  Firmware images and
+firmware updates are shipped without any of this information.
+
+Ghidra needs this information to meaningfully display the contents of the firmware
+binary. So all of this information needs to be guessed or inferred when you start
+a Ghidra project.
+
+---[ 1. The instruction set or "language".
+
+Although the instruction set can be guessed by looking at relative frequency of bytes
+used to encode different instruction sets---think of this as a machine learning
+exercise---there is usually a more direct way. Reading the part number markings off the chips
+and searching for them usually leads you to the manufacturers' data sheets for that
+chip. The datasheet identifies the instruction set.
+
+In our classroom example, the chip was marked STM32F405. Searching for it gives you
+a seller's catalog page with a lot of information and a link to the datasheet:
+
+https://www.digikey.com/en/products/detail/stmicroelectronics/STM32F405RGT6TR/4755958
+
+https://www.st.com/content/ccc/resource/technical/document/datasheet/ef/92/76/6d/bb/c2/4f/f7/DM00037051.pdf/files/DM00037051.pdf/jcr:content/translations/en.DM00037051.pdf
+
+Datasheets are fascinating reading. (For a reverser, it's the best kind of bedside
+reading.) For example, they identify the I/O ports and memory ranges, and describe
+features that firmware programmers are likely to use as described, helping you
+identity some of the simpler functions in the image and shedding some light on
+the functions that call them, too.
+
+The very first page of the datasheet identifies the instruction set: Arm® 32-bit
+Cortex®-M4 CPU.
+
+Ghidra's term for the instruction set is "language," which you'll see in the very first
+dialog box when you load a file. Since we don't want to scroll through the many ISAs
+supported by Ghidra, we type "cortex" into the Filter box. Two picks remain: Cortex big
+endian and Cortex little endian.
+
+To figure out which to pick, we can try and look at the addresses: do they look right?
+The little endian does it.
+
+For the Format we choose "Raw binary."
+
+---[ 2. Setting the load address.
+
+Unlike ELF, the raw image does not specify the entry point or the load addresses. It does
+specify the top of the stack and the interrupt handler addresses, so we have some
+addresses to go by.
+
+The load address can be figured out by trial and error, or gleaned from the manufacturer's
+software development kit if you can find one. For trial and error, lead the image at
+address 0---this will be wrong, but you'll see some of the address ranges you are dealing
+with from the disassembly.
+
+For this image, 0x0800.0000 is the load address for the bootloader. Incidentally,
+the application code starts at 0x0800.C000.
+
+------- Recording starts at this point -------
+
+
