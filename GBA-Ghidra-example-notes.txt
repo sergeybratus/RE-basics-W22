@@ -1,0 +1,144 @@
+
+=================[ Loading and annotating a GameBoyAdvance ROM image in Ghidra ]===============
+
+GameBoyAdvance (GBA) is a dual Z80/ARM platform, with a number of interesting features. We
+looked at a free game ROM for GBA in Ghidra.
+
+We recommend following along with Ghidra and a GBA emulator with debugging capabilities.
+The key point of this exercise is to gain fluency with ARM disassembly, and GBA presents
+many examples that elsewhere can only be found in shellcode or other highly non-standard
+binary payloads.
+
+We used VisualBoyAdvance-m, which seems to work best on Macs, but No$gba [https://problemkaputt.de/gba.htm],
+mGBA [https://mgba.io/], and BGB [https://bgb.bircd.org/] may work for you on Windows or Linux
+(see Benjamin's very helpful note on Slack). 
+
+--------[ GBA info and links ]-------
+
+A quick summary of the GBA platform: https://www.copetti.org/writings/consoles/game-boy-advance/
+
+We used the VisualBoyAdvance-m emulator (https://github.com/visualboyadvance-m/visualboyadvance-m).
+I used "brew install visualboyadvance-m" to install it on my Mac. After installation, you have to right click
+on "visualboyadvance-m.app" in "/Applications" and choose "Open", so that MacOS will allow
+you to run it without a signature. Sadly, there were many crashes on my Mac---but the basic emulation,
+the Tools/Disaasembler, and the Tools/Memory View features mostly worked, and allowed saving memory
+snapshots, too. YMMV.
+
+We used the free "GORF" ROM https://emulationking.com/gorf/ from the homebrew ROMs site
+https://emulationking.com/category/gba-roms/
+[Reportedly, there were some bad ads on that site, but I used Brave with Javascript turned off,
+ and didn't see any. Note: some of these free ROMs are the legacy Z80 rather than ARM. I love
+ Z80 games, but ARM ones are more challenging to disassemble.] 
+
+GBA memory map:
+http://problemkaputt.de/gbatek.htm#gbamemorymap
+(For adding segments to Ghidra's memory map, I used the Java source file for the GhidraGBA
+  plugin from https://github.com/SiD3W4y/GhidraGBA)
+
+A nice article on GBA reversing in Ghidra, explaining how to load the .gba file without
+any special plugins:  https://cturt.github.io/pinball.html
+
+More on interrupt handling and other GBA programming topics:
+https://jamiedstewart.github.io/category/Game%20Boy%20Advance.html
+https://jamiedstewart.github.io/gba%20dev/2019/09/11/GBA-Dev-Hardware-Interrupts.html
+(we looked at the GBA interrupt table today in emulator and Ghidra)
+
+Another nifty writeup on GBA and Ghidra: https://wrongbaud.github.io/posts/ghidra-debugger/
+
+--------[ Connecting the ARM instruction manual to Ghidra ]--------
+
+To get the right page of the ARM instruction manual displayed when you click "Tools > Processor Manual ..."
+with your cursor on an instruction:
+
+https://github.com/NationalSecurityAgency/ghidra/issues/38
+
+(In the Ghidra top level directory, I did:
+"wget https://www.cs.utexas.edu/~simon/378/resources/ARMv7-AR_TRM.pdf -O Ghidra/Processors/ARM/data/manuals/Armv7AR_errata.pdf") 
+
+--------[ Loading the image overcoming the initial lack of disassembly ]--------
+
+I loaded Gorf.gba as a Raw Binary, with the ARM v4t little-endian language. We know from
+the emulator and the GBA architecture writeups that the GBA cartridge ROMs are loaded by
+the GBA CPU at 0x8000000, so we specify this in Options.
+
+Despite this, we see almost no disassembly on load. This is because Ghidra does not know
+the entry point. The GhidraGBA plugin supplies it programmatically, but we can also do it manually,
+by hitting "Disassembly" at 0x8000000. Now we see a branch to 0x80000c0 and another to 0x80000e0,
+which looks like a legitimate ARM function.
+
+At this point we can redo the analysis (keypress "A"). Ghidra will supply addresses and values
+that can be inferred statically from the addresses and constants feeding into the instructions
+straight into the disassembly, with "=>" for the inferred values.
+
+At 0x8000100 we find the interrupt handler for GBA's hardware interrupts. It reads from the
+0x04000202 address (the "IF" IO register), applies a series of single-bit bitmasks and calls
+specific functions by pointers in IRAM (the 0x3000000 memory segment).
+
+Note that in the in-class recording I did not initially check the "volatile" flag for the
+IO memory segment 0x400000--0x40003ff. The decompiler then produced C code that suggested
+there the 0x04000202 location was read twice, which was not true to the binary code and
+the disаssembly. Once I checked the volatile checkbox in Ghidra's Memory Map, though,
+the disassembly corrected itself to the correct single-read from 0x04000202, now represented
+as a function read_volatile_2: "uVar1 = read_volatile_2(DAT_04000202);"
+
+The interrupt handler function at 0x8000100 helps cross-reference the different function
+pointers in the IRAM (a.k.a. PAK's RAM at 0x3000000) and the ROM.
+
+-------------[ Printing string messages to the screen ]--------------
+
+Using Ghidra's Search function ("S" keypress), we can find some---but not all!---strings that
+will appear on the screen. The functions responsible for that illustrated some essential
+ARM binary artifacts and tricks. Make sure that you follow and understand these tricks!
+
+Make sure you understand what the function at 0x08000184 does. You will likely need to
+peruse the ARM documentation pseudocode for the LDRT instructions to get it. This function
+uses the LR register---normally used by BL instructions to save the address to return to after
+a function call---to pick up both the string argument interspersed with the executable code
+and the pointer that allows the function's final "BX LR" to overjump the string and the literal
+pool address. This is super-important to understand how ARM ISA works.
+
+Take a look at the function at 0x08000178 as well. It presents a less complex but also important
+trick.
+
+The function at 0x080005a0 computes an address in GBA's video memory to print the strings
+to.  You will see many invocations of this function just before the literal string output
+to the screen is processed by 0x08000184.
+
+--------------[ Finding global variables ]--------------
+
+In this ROM, global variables such as the remaining number of lives, the mission number, etc.,
+are stored in IWRAM (the 0x2000000 segment), and their addresses are supplied by dedicated
+functions. This is reminiscent of C++ getters and setters.
+
+In particular, the function at 0x0843e160 is the getter for lives, stored at 0x020020c4.
+Once you label this function as a lives getter, you can navigate its cross-references
+to wherever this number is relevant, including where it is output to the screen.
+
+For this ROM, this is the common pattern. A function merely returning an IWRAM storage location
+for a global variable to be printed on the screen like lives (0x020020c4, returned by the function
+at 0x843e160) or mission number (find it by searching for "MISSION" and then fixing the disassembly
+around the literal address and the string pattern used by 0x08000184).
+
+After a while it becomes clear that global game variables are stored in IRAM at 0x2000000 and
+their addresses are supplied by dedicated functions that return these addresses and do nothing
+else. Printing functions that reference strings can be used as clues to what these variables
+and their "getter" functions mean.
+
+---------[ Ghidra's failure to parse an ARM instruction ]-----------
+
+The function at 0x08000e14 is referenced from many locations, but fails to disassemble.
+Specifically, instructions at 0x8000e20, 0x8000e3c, 0x8000e48, and 0x8000e5c aren't
+recognized.
+
+This failure is made obvious the disassembler of the VisualBoyAdvance-m emulator, which
+happily recognizes these instructions as variants of the LDRH instruction, e.g.
+"LDRH r2, [R11], #0x2" at 0x8000e20. No tool is perfect.
+
+Luckily, Ghidra includes a language for describing such instructions, in the Sleigh
+language. We will look at it next time.
+
+
+
+
+
+
