@@ -63,3 +63,6 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 
 <p><a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/loading-raw-binary-into-ghidra.txt">Notes on loading raw binaries in Ghidra</a> (the lost part of the X-hour video).
 
+<hr>
+
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/GBA-Ghidra-example-notes.txt">Notes on Ghidra analysis of a GBA ARM v4t ROM</a>
