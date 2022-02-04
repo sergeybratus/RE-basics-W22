@@ -37,7 +37,7 @@ The failing instructions are at 08000e20, 08000e3c, 08000e48, and 08000e5c:
         08000e14 04 30 bd e4     ldrt       r3,[sp],#0x4
         08000e18 00 b0 a0 e1     mov        r11,r0
         08000e1c 04 00 bd e4     ldrt       r0,[sp],#0x4
-        08000e20 b2              ??         B2h
+        08000e20 b2              ??         B2h            // Ouch!
         08000e21 20              ??         20h     
         08000e22 fb              ??         FBh
         08000e23 e0              ??         E0h
@@ -48,12 +48,12 @@ The failing instructions are at 08000e20, 08000e3c, 08000e48, and 08000e5c:
         08000e30 b0 40 53 e0     ldrh       r4,[r3],#0x0
         08000e34 3f 4b 04 e2     and        r4,r4,#0xfc00
         08000e38 09 40 84 e0     add        r4,r4,r9
-        08000e3c b2              ??         B2h
+        08000e3c b2              ??         B2h            // Ouch!!
         08000e3d 40              ??         40h    @
         08000e3e e3              ??         E3h
         08000e3f e0              ??         E0h
         08000e40 01 c0 5c e2     subs       r12,r12,#0x1
-        08000e44 1e ff 2f 01     bxeq       lr
+        08000e44 1e ff 2f 01     bxeq       lr             // Ouch!!!
         08000e48 b2              ??         B2h
         08000e49 20              ??         20h     
         08000e4a fb              ??         FBh
@@ -62,7 +62,7 @@ The failing instructions are at 08000e20, 08000e3c, 08000e48, and 08000e5c:
         08000e50 b0 40 53 e0     ldrh       r4,[r3],#0x0
         08000e54 3f 4b 04 e2     and        r4,r4,#0xfc00
         08000e58 09 40 84 e0     add        r4,r4,r9
-        08000e5c b2              ??         B2h
+        08000e5c b2              ??         B2h           // Where's my instruction??
         08000e5d 40              ??         40h    @
         08000e5e e3              ??         E3h
         08000e5f e0              ??         E0h
