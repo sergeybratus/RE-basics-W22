@@ -66,3 +66,8 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 <hr>
 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/GBA-Ghidra-example-notes.txt">Notes on Ghidra analysis of a GBA ARM v4t ROM</a>
+
+<hr>
+
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Ghidra-Sleigh-and-Pcode-notes.txt">Notes on Ghidra's Sleigh CPU/instruction definitions and P-code</a> (teaching Ghidra to recognize, disasseble, and decompile a GBA instruction it considers invalid out of the box).
+
