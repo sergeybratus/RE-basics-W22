@@ -1,0 +1,385 @@
+
+=====================[ Ghidra's Sleigh and P-code notes ]=====================
+
+We encourage you to reproduce these steps in Ghidra and Sleigh. Remember that fluency only
+comes with practice. With complex tools, everybody stumbles around a lot---the difference
+between the expert user and a novice is how quickly they try things and recover.
+
+Today we saw one of the most exciting designs of Ghidra and RE tools: the Sleigh
+language for describing processor instruction sets, and translating them to a
+universal set of virtual operations, P-code. This design not only enables us to
+quickly add an instruction encoding (and operational semantics) to Ghidra's ARMv4t
+disassembler, but also allows one to quickly create decompilers---much more complex
+than disassemblers!---for new processors, by making the decompiler work off of the
+universal P-code, into which specific ISAs are translated. Although some details
+are lost, it's decompilers almost for free! (see notes below)
+
+--------------[ Teaching Ghidra's disassembler to recognize a GBA instruction ]-------
+
+Recall that we ran into a problem with one of the ROM's functions: it contained
+several instructions that weren't recognized as valid. Disassembly failed, and
+with it also failed decompilation and data flow analyses.
+
+The failing instructions are at 08000e20, 08000e3c, 08000e48, and 08000e5c:
+
+**************************************************************
+*                                                            *
+*  FUNCTION                                                  *
+**************************************************************
+   undefined process_screen_string()
+   undefined         r0:1           <RETURN>
+   process_screen_string                           XREF[10]:    08442860(c), 08442894(c), 
+                                                                0844291c(c), 08442950(c), 
+                                                                08442a0c(c), 08442abc(c), 
+                                                                08442afc(c), 
+                                                                FUN_0844897c:0844897c(c), 
+                                                                084489b4(c), 084489ec(c)  
+        08000e14 04 30 bd e4     ldrt       r3,[sp],#0x4
+        08000e18 00 b0 a0 e1     mov        r11,r0
+        08000e1c 04 00 bd e4     ldrt       r0,[sp],#0x4
+        08000e20 b2              ??         B2h
+        08000e21 20              ??         20h     
+        08000e22 fb              ??         FBh
+        08000e23 e0              ??         E0h
+        08000e24 ff c0 12 e2     ands       r12,r2,#0xff
+        08000e28 1e ff 2f 01     bxeq       lr
+                             LAB_08000e2c                                    XREF[1]:     08000e64(j)  
+        08000e2c 22 94 a0 e1     mov        r9,r2, lsr #0x8
+        08000e30 b0 40 53 e0     ldrh       r4,[r3],#0x0
+        08000e34 3f 4b 04 e2     and        r4,r4,#0xfc00
+        08000e38 09 40 84 e0     add        r4,r4,r9
+        08000e3c b2              ??         B2h
+        08000e3d 40              ??         40h    @
+        08000e3e e3              ??         E3h
+        08000e3f e0              ??         E0h
+        08000e40 01 c0 5c e2     subs       r12,r12,#0x1
+        08000e44 1e ff 2f 01     bxeq       lr
+        08000e48 b2              ??         B2h
+        08000e49 20              ??         20h     
+        08000e4a fb              ??         FBh
+        08000e4b e0              ??         E0h
+        08000e4c ff 90 02 e2     and        r9,r2,#0xff
+        08000e50 b0 40 53 e0     ldrh       r4,[r3],#0x0
+        08000e54 3f 4b 04 e2     and        r4,r4,#0xfc00
+        08000e58 09 40 84 e0     add        r4,r4,r9
+        08000e5c b2              ??         B2h
+        08000e5d 40              ??         40h    @
+        08000e5e e3              ??         E3h
+        08000e5f e0              ??         E0h
+        08000e60 01 c0 5c e2     subs       r12,r12,#0x1
+        08000e64 f0 ff ff ca     bgt        LAB_08000e2c
+        08000e68 1e ff 2f e1     bx         lr
+
+On the other hand, our GBA emulator shows these instructions as valid, the first one
+ ldrh r2, [r11], #0x2 , the second one
+ strh r4, [r3],  #0x2, and so on.
+
+At the same time, there's an ldrh instruction at 0x08000e30 that gets disassembled correctly.
+Something isn't right---it seems that the disassembler misses a form of this load instruction,
+and another of its corresponding store instruction, strh.
+
+Looking up ldrh in the ARMv4t instruction manual (Ghidra's "Tools >> Processor Manual"),
+we can see that that the instruction matches the bit layout (p. 464, "A8.6.74 LDRH (immediate, ARM)").
+
+31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+   cond    | 0  0  0| P| U| 1| W| 1|   Rn      |   Rt      | imm4H   |1 0 1 1| imm4L
+
+Our first "bad" instruction is  "e0 fb 20 b2" (remember: it's little-endian, but the GBA emulator
+shows us the correctly ordered 4-byte word). The encoding looks dense, but in fact it's
+really simple: the P, U, and W flags control variants of the instruction, as per pseudo-code
+on this and the next page. For example, U controls whether the offset "imm" is added or subtracted.
+
+So "cond" is 0xe (Always/unconditional, cf. p.320, "A8.3 Conditional execution"), P is 0
+(the ARM post-indexing form rather that Thumb's pre-indexing, the address in Rn will be used
+for the memory load, the imm offset will be added to Rn thereafter), U is 1 (imm offset is added,
+not subtracted), W is 1 (the base register Rn will be updated to Rn + imm), Rn is 0xb (r11),
+Rt is 2, imm4 is 0 and immL is 2. All seems to be in order. 
+
+We note that the pseudocode in the manual directs us to the LDRHT form of the instruction,
+p.470, but that instruction operates the same way, except for some memory protection details
+likely not relevant for GBA.
+
+Suggested exercise: manually disassemble the STRH instructions from the above sample. 
+
+----------------[ Defining ISA parsing and semantics in Sleigh ]----------------
+
+Fortunately, Ghidra's Sleigh language and tool have a very readable and easily adjustable
+description of the ARMv4t assembly. These will allow us to teach Ghidra to parse the "bad"
+instructions with a few simple edits (once we understand the structure of the language).
+
+Processor/ISA descriptions are found in ghidra_10.1.1_PUBLIC/Ghidra/Processors/ARM/data/languages/.
+We are specifically interested in ARMv4t, but the file  ARM.ldefs  defines all the ARM variations
+that you can selected in the "Languages" field when loading a Raw Binary image.
+
+Looking inside this file, you'll see it reference processor specs (ARMt_v45.pspec for ARMv4t),
+and the (compiled) ISA specs (e.g., ARM4t_le.sla). The latter is an XML file that can
+be conveniently diff-ed, but not so conveniently read or written. This .sla file is compiled
+by the tool  ~/ghidra_10.1.1_PUBLIC/support/sleigh  from  ARM4t_le.slaspec  .
+
+The file ARM4t_le.slaspec is actually just a wrapper around ARM.sinc, which in turn
+wraps ARMinstructions.sinc, where both the bitwise layout and semantics of actual
+ARM instructions is defined:
+
+% cat ARM4t_le.slaspec
+
+@define ENDIAN "little"
+@define T_VARIANT ""
+
+@include "ARM.sinc"
+
+% tail ARM.sinc
+
+@include "ARMinstructions.sinc"
+
+# THUMB instructions
+@ifdef T_VARIANT
+@include "ARMTHUMBinstructions.sinc"
+@endif
+
+When we look for ldrh in this file, we find a reasonable-looking definition. The operational
+semantics description ends with zero-extending 2 bytes retrieved from an address, as expected:
+
+:ldrh^COND Rd,addrmode3         is $(AMODE) &  COND & c2527=0 & L20=1 & c0407=11 & Rd & addrmode3
+{
+  build COND;
+  build addrmode3;
+  Rd = zext( *:2 addrmode3);
+}
+
+The first line is a pattern for the disassembler to match to produce an ldrh instruction from
+the binary bytes. The bitwise predicates to test are that the address is in the ARM mode ($AMODE),
+the COND prefix looks OK, and several bit spans of the instructions match, such as c2527, L20, and c0407.
+These are defined at the top of the file, and are quite obviously just bit ranges:
+
+define token instrArm (32)
+    cond=(28,31)
+    I25=(25,25)
+    P24=(24,24)   // that's our P flag in the ldrh instruction encoding 
+    H24=(24,24)
+    L24=(24,24)
+    U23=(23,23)   // that's our U flag
+    B22=(22,22)
+    N22=(22,22)
+    S22=(22,22)
+    op=(21,24)
+    W21=(21,21)   // ..and W 
+    S20=(20,20)
+    L20=(20,20)
+    Rn=(16,19)    // ..and the base register number  
+<skip>
+    Rd=(12,15)    // ..and the destination register, a.k.a. Rt in the processor manual
+<skip>
+    c2527=(25,27)
+<skip>    
+    c2122=(21,22)
+<skip>
+    c0407=(4,7)
+... etc.
+
+These bit ranges all seem to match perfectly. So the tricky part that doesn't match
+our "e0 fb 20 b2" instruction is likely in the addrmode3.
+
+Looking at the definitions of addrmode3 at the top of the file, there are  multiple
+patterns to match based on the values of the P, U, and W bits (W is included in c2122
+in these definitions).
+
+For example, in the pre-index mode (P==1) for positive and negative offsets, without writeback
+to the base register Rn:
+
+addrmode3: [rn,"#"^off8]                is P24=1 & U23=1 & c2122=2 & rn & immedH & c0707=1 & c0404=1 & immedL
+  [ off8=(immedH<<4)|immedL;]
+{
+  local tmp = rn + off8; export tmp;
+}
+
+addrmode3: [rn,"#"^noff8]               is P24=1 & U23=0 & c2122=2 & rn & immedH & c0707=1 & c0404=1 & immedL
+  [ noff8=-((immedH<<4)|immedL);]
+{
+  local tmp = rn + noff8; export tmp;
+}
+
+Notably, P24 has 10 cases for P=1 but only 8 for P=0 (find these in the code!):
+
+% grep P24=0  ARMinstructions.sinc | grep addrmode3 | wc
+       8     156     810
+% grep P24=1  ARMinstructions.sinc | grep addrmode3 | wc
+      10     180     934
+
+So the reason for the "bad" instruction may be that we are missing some bitwise cases in these Sleigh
+definitions.
+
+Looking at the pseudocode for LDRH and LDRHT in the processor manual, it seems that the following
+additional definitions would cover our "bad" instructions. Note that P is 0, but W (inside c2122) is 1,
+just as we have it.
+
+###### SB: preindex, with writeback, add
+addrmode3: [rn],"#"^noff8               is P24=0 & U23=1 & c2122=3 & rn & immedH & c0707=1 & c0404=1 & immedL
+  [ noff8=(immedH<<4)|immedL;]
+{
+  local tmp=rn; rn=rn + noff8; export tmp;
+}
+
+###### SB: preindex, with writeback, substract
+addrmode3: [rn],"#"^noff8               is P24=0 & U23=0 & c2122=3 & rn & immedH & c0707=1 & c0404=1 & immedL
+  [ noff8=-((immedH<<4)|immedL);]
+{
+  local tmp=rn; rn=rn + noff8; export tmp;
+}
+
+Note that this code gives the postindex semantics: the original address in Rn is saved and used for the
+memory access, and (only) then the value in Rn is updated.
+
+This seems to work!
+
+% ~/ghidra_10.1.1_PUBLIC/support/sleigh ARM4t_le.slaspec
+openjdk version "17.0.1" 2021-10-19
+OpenJDK Runtime Environment Homebrew (build 17.0.1+1)
+OpenJDK 64-Bit Server VM Homebrew (build 17.0.1+1, mixed mode)
+INFO  Using log config file: jar:file:/Users/user/ghidra_10.1.1_PUBLIC/Ghidra/Framework/Generic/lib/Generic.jar!/generic.log4j.xml (LoggingInitialization)  
+INFO  Using log file: /Users/user/.ghidra/.ghidra_10.1.1_PUBLIC/application.log (LoggingInitialization)  
+WARN  150 NOP constructors found (SleighCompile)  
+WARN  Use -n switch to list each individually (SleighCompile)  
+WARN  2 unnecessary extensions/truncations were converted to copies (SleighCompile)  
+WARN  Use -u switch to list each individually (SleighCompile)  
+
+A new ARM4t_le.sla is produced. We quit and restart Ghidra, reload the GBA project, and suddenly we
+have the full disassembly _and_ decompilation (you may need to press "d" on these instructions,
+but now it works!):
+
+**************************************************************
+*                                                            *
+*  FUNCTION                                                  *
+**************************************************************
+   undefined process_screen_string()
+     undefined         r0:1           <RETURN>
+     process_screen_string                           XREF[10]:    08442860(c), 08442894(c), 
+                                                                  0844291c(c), 08442950(c), 
+                                                                  08442a0c(c), 08442abc(c), 
+                                                                  08442afc(c), 
+                                                                  FUN_0844897c:0844897c(c), 
+                                                                  084489b4(c), 084489ec(c)  
+        08000e14 04 30 bd e4     ldrt       r3,[sp],#0x4
+        08000e18 00 b0 a0 e1     mov        r11,r0
+        08000e1c 04 00 bd e4     ldrt       r0,[sp],#0x4
+        08000e20 b2 20 fb e0     ldrh       r2,[r11],#0x2   // Yay!
+        08000e24 ff c0 12 e2     ands       r12,r2,#0xff
+        08000e28 1e ff 2f 01     bxeq       lr
+                             LAB_08000e2c                                    XREF[1]:     08000e64(j)  
+        08000e2c 22 94 a0 e1     mov        r9,r2, lsr #0x8
+        08000e30 b0 40 53 e0     ldrh       r4,[r3],#0x0
+        08000e34 3f 4b 04 e2     and        r4,r4,#0xfc00
+        08000e38 09 40 84 e0     add        r4,r4,r9
+        08000e3c b2 40 e3 e0     strh       r4,[r3],#0x2    // Yay!!
+        08000e40 01 c0 5c e2     subs       r12,r12,#0x1
+        08000e44 1e ff 2f 01     bxeq       lr
+        08000e48 b2 20 fb e0     ldrh       r2,[r11],#0x2
+        08000e4c ff 90 02 e2     and        r9,r2,#0xff
+        08000e50 b0 40 53 e0     ldrh       r4,[r3],#0x0
+        08000e54 3f 4b 04 e2     and        r4,r4,#0xfc00
+        08000e58 09 40 84 e0     add        r4,r4,r9
+        08000e5c b2 40 e3 e0     strh       r4,[r3],#0x2   // Yay!!!
+        08000e60 01 c0 5c e2     subs       r12,r12,#0x1
+        08000e64 f0 ff ff ca     bgt        LAB_08000e2c
+        08000e68 1e ff 2f e1     bx         lr
+
+-----------------[ Free decompilers for new processors! ]------------------
+
+Disassemblers are tricky, but program analysis tools and decompilers are much
+harder---years in expert developer effort, prior to Ghidra. Ghidra's truly revolutionary
+contribution was to make it much faster, within the reach of a dedicated developer's
+hobby project.
+
+Some stories of such rapid development:
+
+https://guedou.github.io/talks/2019_BeeRump/slides.pdf -- "Implementing a New CPU Architecture for Ghidra",
+@guedou (note the minimal examples of what worked)
+
+https://swarm.ptsecurity.com/creating-a-ghidra-processor-module-in-sleigh-using-v8-bytecode-as-an-example/
+-- "Creating a Ghidra processor module in SLEIGH using V8 bytecode as an example", Natalya Tlyapova
+
+https://www.reddit.com/r/ghidra/comments/f5lk42/my_experience_writing_processor_modules/ 
+
+https://habr.com/en/post/443318/ (applied to a Web Assembly challenge)
+
+https://github.com/VGKintsugi/Ghidra-SegaSaturn-Processor
+
+There's also a mock-up processor tutorial:
+https://spinsel.dev/2020/06/17/ghidra-brainfuck-processor-1.html
+
+(and many more)
+
+----------------[ P-code ]----------------
+
+Ghidra disassemblers produce not just a visual representation of the raw binary code they parse,
+but also an executable operational semantics representation of the ISA, in P-code. Each raw assembly
+instruction is translated into one or more---typically several---P-code instructions, which
+fairly closely represent the pseudo-code of processor manuals.
+
+At the core, P-code represents the common elementary blocks of CPU logic, such as integer
+arithmetic at various widths, boolean logic operations, and control flow transfers such as
+direct and indirect jumps. Raw P-code also includes CALL and RETURN opcodes that are
+semantically equivalent to jumps---unlike typical ISA calls and returns, they don't save
+the return address, handle the call stack, etc., leaving all that to other explicit elementary
+P-code instructions----but preserve the programmer's/compilers intent that those control
+transfers are indeed intended to be calls or returns. These pseudo-instructions are a favorite
+for Ghidra scripts and program analyses.
+
+Basic P-code corresponding to raw disassembly (and explaining exactly what the particular
+instructions do, so far as Ghidra knows from its Sleigh description of the CPU and ISA)
+can be displayed by clicking on the "jenga" button and enabling the P-code field, as follows:
+
+https://reverseengineering.stackexchange.com/questions/21297/can-ghidra-show-me-the-p-code-generated-for-an-instruction?noredirect=1
+
+At the same time, P-code includes additional opcodes like MULTIEQUAL and USERDEFINED that
+are inserted and used by advanced program analyses such as backward program path traversal
+plugins (see below).
+
+A good concise description of P-code can be found at
+https://spinsel.dev/assets/2020-06-17-ghidra-brainfuck-processor-1/ghidra_docs/language_spec/html/pcoderef.html
+
+----------------------[ Program analysis with P-code ]----------------------
+
+P-code is exposed to Ghidra scripts and plugins for automating analysis of binary programs.
+
+A very useful blogpost about using P-code for program analysis is
+https://www.riverloopsecurity.com/blog/2019/05/pcode/
+(accompanied by https://github.com/0xAlexei/INFILTRATE2019/blob/master/PCodeMallocDemo/MallocTrace.java)
+
+(I mentioned it in class)
+
+----------------------[ P-code is executable! ]----------------------
+
+P-code is executable and can be run in an emulator. Executing P-code would be a good way
+to check that the added instructions for the GBA example actually match the GBA
+VisualGameBoy-m emulator's idea of what the recovered instructions actually do.
+
+Some more information about P-code emulation:
+
+https://medium.com/@cetfor/emulating-ghidras-pcode-why-how-dd736d22dfb
+
+(Look at Emulate Program description in Ghidra Release notes:
+https://htmlpreview.github.io/?https://github.com/NationalSecurityAgency/ghidra/blob/Ghidra_10.1.2_build/Ghidra/Configurations/Public_Release/src/global/docs/WhatsNew.html:
+
+"""
+"Pure Emulation
+
+There's a new action Emulate Program (next to the Debug Program button) to launch the
+current program in Ghidra's p-code emulator. This is not a new "connector." Rather, it
+starts a blank trace with the current program mapped in. The user can then step using the
+usual "Emulate Step" actions in the "Threads" window. In general, this is sufficient to
+run simple experiments or step through local regions of code. To modify emulated machine
+state, use the "Watches" window. At the moment, no other provider can modify emulated
+machine state.
+
+This is also very useful in combination with the "P-code Stepper" window (this plugin must
+be added manually via File->Configure). A language developer can, for example, assemble an
+instruction that needs testing, start emulating with the cursor at that instruction, and
+then step individual p-code ops in the "P-code Stepper" window.
+"""
+)
+
+------
+
+We will continue with examples of Ghidra scripts and plugins.
+
+
