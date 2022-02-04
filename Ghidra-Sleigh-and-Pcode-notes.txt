@@ -337,6 +337,8 @@ plugins (see below).
 A good concise description of P-code can be found at
 https://spinsel.dev/assets/2020-06-17-ghidra-brainfuck-processor-1/ghidra_docs/language_spec/html/pcoderef.html
 
+Suggested exercise: Display, read, and understand P-code for BL, BX, ADD, LDRT, and other instructions. 
+
 ----------------------[ Program analysis with P-code ]----------------------
 
 P-code is exposed to Ghidra scripts and plugins for automating analysis of binary programs.
