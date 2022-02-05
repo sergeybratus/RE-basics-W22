@@ -71,3 +71,7 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Ghidra-Sleigh-and-Pcode-notes.txt">Notes on Ghidra's Sleigh CPU/instruction definitions and P-code</a> (teaching Ghidra to recognize, disasseble, and decompile a GBA instruction it considers invalid out of the box).
 
+<hr>
+
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/annotate-GBA-strings.py">Example GBA automation script</a> from the cancelled X-hour. We'll revisit it in class on Tuesday.
+
