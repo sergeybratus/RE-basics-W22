@@ -75,3 +75,7 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/annotate-GBA-strings.py">Example GBA automation script</a> from the cancelled X-hour. We'll revisit it in class on Tuesday.
 
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Random_Acts_of_RE_Graham.pdf">Robert Graham's invited talk slides</a>
+
+<hr>
+
