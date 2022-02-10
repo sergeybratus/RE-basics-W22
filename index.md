@@ -79,3 +79,4 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 
 <hr>
 
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Ghidra-scripts-and-class-hierarchy-notes.txt">GhidraScript and class hierarchy notes</a>
