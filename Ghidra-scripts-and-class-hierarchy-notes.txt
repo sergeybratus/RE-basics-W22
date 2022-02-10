@@ -1,0 +1,178 @@
+
+Ghidra has an elaborate hierarchy of object classes that model a binary program.  These
+collections of objects include addresses, data types and structures, symbols and symbol
+tables, instructions, code and data units (listings), symbolic assignments to variables
+(equates), decompiled function (high functions), and so on.
+
+The upside of this extremely rich type system is that it's often non-intuitive which
+arguments are needed for which Ghidra scripted action, and what they might be called.  For
+example, does Ghidra's disassembly function need an offset, an address, or a symbol as its
+disassembly starting point? What kinds of arguments should be given to the decompilation
+routine (clearly, it needs both the disassembly and whatever symbol information might be
+available or recovered; what else?)? When one annotates data types associated with the
+program's variables, which datatypes are known to Ghidra for a mere raw binary with a
+specific "language"/ISA, and how can more data types be defined and loaded? And so on.
+
+Ghidra's Flat APIs provides convenient functions that could be called---including interactively
+from the Python command line/console---with a minimal understanding of the Java class hierarchy.
+
+Flat APIs provide the most critical methods to navigate a binary, such enumerating the
+cross-references from and to an Address object (getReferencesFrom/getReferencesTo),
+alongside with the convenience function to create Address objects from integers and
+strings (toAddr). Flat APIs also provide functions to create annotations for the Ghidra GUI 
+to display, and to interact with the GUI via dialog boxes.
+
+It is absolutely worth your while to read and experiment with the Flat API line by line:
+  https://ghidra.re/ghidra_docs/api/ghidra/program/flatapi/FlatProgramAPI.html
+
+Note that the Flat APIs class inherits from GhidraScript---as do all scripts---so all of
+GhidraScript's methods are available from inside Java scripts and from the Python console.
+Read through this specification as well:
+  https://ghidra.re/ghidra_docs/api/ghidra/app/script/GhidraScript.html
+
+For example, take a look at the ask* methods (askAddress, askBytes, askDirectory, etc.).
+These will pop up dialog boxes to input values of different types. 
+
+All Ghidra scripts derive from GhidraScript's, to inherit its methods. Note that
+the example below, PCodeDumpSF.java, also derives from GhidraScript.
+
+==================[ Basic object packaging ]==================
+
+The root struct/class for the kinds of objects that represent the knowledge of a binary program
+with some symbols and types recovered is the Program class:
+  https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/Program.html
+
+Note that it gathers both listing units (code and data) and the symbol tables, plus
+whatever is known about the data memory. All of these kinds of information are
+helpful for decompilation, and therefore the decompiler interface "opens" the Program
+object that contains it all. This explains the seemingly convoluted decompilation API,
+which needs to "open" a Program object.
+
+Let's look at the (rather verbose, don't get discouraged!) script
+https://github.com/d-millar/ghidra_pcode_scripts/blob/master/PCodeDumpSF.java
+that extracts P-code from decompiled functions. 
+
+It is instructive to look at the import statements. There are several large clusters of
+classes that describe individual program elements, under "ghidra.program.model.data."
+(including Pointer, Array, Structure, etc.), "ghidra.program.model.pcode." (including
+individual PcodeOps, Varnodes, and HighFunction, which holds the decompiled code and the
+results of program analysis. There are also "ghidra.program.model.address.Address" and
+"ghidra.program.model.symbol.Symbol" to represent the basic concepts of the loaded memory
+address and a named entity at an address.
+
+Note that these are all under "program.model", which makes perfect sense---all of these
+are concepts abstract and interpret the raw binary bytes, but also lose some raw information;
+this is exactly what a "model" is.
+
+Also note that Function is under "listing", as functions are normally associated with contiguous
+sequences of instructions or code units (in ARM also data units such as constant pools).
+However, HighFunction is under "pcode", as Ghidra's decompilation adds additional P-code
+beyond the CPU model (described in Sleigh), to represent some of the inferred results about
+the program, recovered during analysis and decompilation, such as MULTIEQUAL. This is
+an interesting way of packaging results. 
+
+=======================[ Python console ]=======================
+
+All of the above classes and methods are exposed to Python. Although Python takes off
+some of the Java programming burden, e.g., we can just Python lists automatically constructed
+from Iterators,  but we still need to make sure that API methods get the right
+type of arguments. 
+
+I find the Python console (Window >> Python) incredibly useful. Together with Python's
+type() and dir() functions for getting the type and the internal dictionary structure of
+an object, I can navigate the complex Java hierarchy and see what various methods
+actually return, and what I need to do to match the types.
+
+Note that the console calls pretty-print methods when you ask to show an object, and
+they don't show the full type:
+
+>>> getGlobalFunctions("process_this_here_string")
+[process_this_here_string]
+
+OK, we got a list of something. What is it?
+
+>>> fn = getGlobalFunctions("process_this_here_string")[0]
+>>> fn 
+process_this_here_string
+>>> type(fn)
+<type 'ghidra.program.database.function.FunctionDB'>
+
+So this is a class FunctionDB, which implements the Function interface
+[https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/Function.html]
+
+We can query this object about its members and methods:
+
+>>> dir(fn)
+['DEFAULT_CALLING_CONVENTION_STRING', 'DEFAULT_LOCAL_PREFIX', 'DEFAULT_LOCAL_PREFIX_LEN', 'DEFAULT_LOCAL_RESERVED_PREFIX', 'DEFAULT_LOCAL_TEMP_PREFIX', 'DEFAULT_PARAM_PREFIX', 'DEFAULT_PARAM_PREFIX_LEN', 'DELIMITER', 'FunctionUpdateType', 'GLOBAL_NAMESPACE_ID', 'ID', 'INLINE', 'INVALID_STACK_DEPTH_CHANGE', 'NAMESPACE_DELIMITER', 'NORETURN', 'RETURN_PTR_PARAM_NAME', 'THIS_PARAM_NAME', 'THUNK', 'UNKNOWN_CALLING_CONVENTION_STRING', 'UNKNOWN_STACK_DEPTH_CHANGE', '__class__', '__copy__', '__deepcopy__', '__delattr__', '__doc__', '__ensure_finalizer__', '__eq__', '__format__', '__getattribute__', '__hash__', '__init__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__str__', '__subclasshook__', '__unicode__', 'addLocalVariable', 'addParameter', 'addTag', 'allVariables', 'autoParameterCount', 'body', 'callFixup', 'callingConvention', 'callingConventionName', 'class', 'comment', 'commentAsArray', 'customVariableStorage', 'defaultCallingConventionName', 'deleted', 'doDeleteVariable', 'entryPoint', 'equals', 'external', 'externalLocation', 'functionThunkAddresses', 'getAllVariables', 'getAutoParameterCount', 'getBody', 'getCallFixup', 'getCalledFunctions', 'getCallingConvention', 'getCallingConventionName', 'getCallingFunctions', 'getClass', 'getComment', 'getCommentAsArray', 'getDefaultCallingConventionName', 'getEntryPoint', 'getExternalLocation', 'getFunctionThunkAddresses', 'getID', 'getKey', 'getLocalVariables', 'getName', 'getParameter', 'getParameterCount', 'getParameters', 'getParentNamespace', 'getProgram', 'getPrototypeString', 'getRepeatableComment', 'getRepeatableCommentAsArray', 'getReturn', 'getReturnType', 'getSignature', 'getSignatureSource', 'getStackFrame', 'getStackPurgeSize', 'getSymbol', 'getTags', 'getThunkedFunction', 'getVariable', 'getVariables', 'global', 'hasCustomVariableStorage', 'hasNoReturn', 'hasVarArgs', 'hashCode', 'inline', 'insertParameter', 'isDeleted', 'isExternal', 'isGlobal', 'isInline', 'isStackPurgeSizeValid', 'isThunk', 'key', 'localVariables', 'moveParameter', 'name', 'noReturn', 'notify', 'notifyAll', 'parameterCount', 'parameters', 'parentNamespace', 'program', 'promoteLocalUserLabelsToGlobal', 'removeParameter', 'removeTag', 'removeVariable', 'repeatableComment', 'repeatableCommentAsArray', 'replaceParameters', 'return', 'returnType', 'setBody', 'setCallFixup', 'setCallingConvention', 'setComment', 'setCustomVariableStorage', 'setInline', 'setInvalid', 'setName', 'setNoReturn', 'setParentNamespace', 'setRepeatableComment', 'setReturn', 'setReturnType', 'setSignatureSource', 'setStackPurgeSize', 'setThunkedFunction', 'setValidationEnabled', 'setVarArgs', 'signature', 'signatureSource', 'stackFrame', 'stackPurgeSize', 'stackPurgeSizeValid', 'symbol', 'tags', 'thunk', 'thunkedFunction', 'toString', 'updateFunction', 'validationEnabled', 'varArgs', 'wait']
+
+...and filter for the methods we need, like getters:
+
+>>> filter( lambda s: s.startswith('get'), dir(fn) )
+['getAllVariables', 'getAutoParameterCount', 'getBody', 'getCallFixup', 'getCalledFunctions', 'getCallingConvention', 'getCallingConventionName', 'getCallingFunctions', 'getClass', 'getComment', 'getCommentAsArray', 'getDefaultCallingConventionName', 'getEntryPoint', 'getExternalLocation', 'getFunctionThunkAddresses', 'getID', 'getKey', 'getLocalVariables', 'getName', 'getParameter', 'getParameterCount', 'getParameters', 'getParentNamespace', 'getProgram', 'getPrototypeString', 'getRepeatableComment', 'getRepeatableCommentAsArray', 'getReturn', 'getReturnType', 'getSignature', 'getSignatureSource', 'getStackFrame', 'getStackPurgeSize', 'getSymbol', 'getTags', 'getThunkedFunction', 'getVariable', 'getVariables']
+
+>>> fn.getCallingFunctions()
+Traceback (most recent call last):
+  File "python", line 1, in <module>
+TypeError: getCallingFunctions(): expected 1 args; got 0
+
+Oops, time to look up the interface to see what kind of argument we are missing.
+It turns out to be the global "monitor" object that connects potentially long analyses
+with Ghidra UI's progress bar. No problem there, we get one such for free:
+
+>>> fn.getCallingFunctions(monitor)
+[FUN_08443758, FUN_08442830, FUN_084486c4, FUN_0844bac4]
+
+>>> type(monitor)
+<type 'ghidra.python.PythonPlugin$PythonInteractiveTaskMonitor'>
+
+For Flat API cross-references, we need to feed in an Address object. toAddr() will
+make one from either an integer or a string:
+
+>>> toAddr(0x8000e14)
+08000e14
+>>> type(toAddr(0x8000e14))
+<type 'ghidra.program.model.address.GenericAddress'>
+
+We can search all of FlatAPIs because they are exported to Python as globals.
+Python's globals() function will give us a dictionary of all globals. It's long,
+so we can filter it:
+
+>>> filter(lambda s: s.startswith("get"), globals())
+['getByte', 'getLastData', 'getPostComment', 'getGhidraVersion', 'getMemoryBlock', 'getAnalysisOptionDescriptions', 'getScriptArgs', 'getCurrentAnalysisOptionsAndValues', 'getEquate', 'getSymbols', 'getProjectRootFolder', 'getCodeUnitFormat', 'getMonitor', 'getAnalysisOptionDefaultValues', 'getFunctionBefore', 'getBytes', 'getFirstData', 'getEquates', 'getCurrentProgram', 'getPreComment', 'getFunctionAt', 'getPlateCommentAsRendered', 'getCategory', 'getAnalysisOptionDefaultValue', 'getNamespace', 'getFragment', 'getSymbol', 'getMemoryBlocks', 'getInstructionContaining', 'getDouble', 'getFloat', 'getReference', 'getSymbolBefore', 'getProgramFile', 'getPostCommentAsRendered', 'getSymbolAt', 'getDataTypes', 'getReferencesFrom', 'getRepeatableComment', 'getInstructionBefore', 'getPreCommentAsRendered', 'getEOLCommentAsRendered', 'getInt', 'getFunctionAfter', 'getDataAt', 'getDataBefore', 'getFirstInstruction', 'getRepeatableCommentAsRendered', 'getDataContaining', 'getLastInstruction', 'getLanguage', 'getAddressFactory', 'getInstructionAt', 'getFunction', 'getReferencesTo', 'getSymbolAfter', 'getPlateComment', 'getLong', 'getFirstFunction', 'getScriptAnalysisMode', 'getUndefinedDataAt', 'getDataAfter', 'getDemangled', 'getAnalysisOptionDescription', 'getUserName', 'getBookmarks', 'getLastFunction', 'getGlobalFunctions', 'getInstructionAfter', 'getDefaultLanguage', 'getUndefinedDataAfter', 'getFunctionContaining', 'getSourceFile', 'getUndefinedDataBefore', 'getEOLComment', 'getShort', 'getState', 'getScriptName']
+
+>>> filter(lambda s: s.startswith("getRef"), globals())
+['getReference', 'getReferencesFrom', 'getReferencesTo']
+
+Tab completion at the console prompt would be nice, but Python introspection is the next best thing.
+
+Sometimes there is no flat API function for what we need, such as getting all types defined
+for the Program. In that case we need to use the Java class hierarchy factories and managers:
+
+>>> p = getCurrentProgram()
+
+>>> p
+gorf.gba - .ProgramDB
+
+>>> type(p)
+<type 'ghidra.program.database.ProgramDB'>
+
+ProgramDB implements the Program interface. A Program has a manager for the data types defined for it
+(which could also be loaded from a file)
+
+>>> dtm = p.getDataTypeManager()
+>>> type(dtm)
+<type 'ghidra.program.database.data.ProgramDataTypeManager'>
+
+>>> dtm.getAllDataTypes()
+java.util.ArrayList$Itr@1bb9e7b3
+
+OK, so we get a Java type to iterate over, but we can easily convert it to a Python list:
+
+>>> tl = dtm.getAllDataTypes()
+>>> list(tl)
+[TerminatedCString, byte, double, float, pointer, string, undefined *, undefined2, undefined4]
+
+So "pointer" is what we needed for marking the GBA example.
+
+
+
