@@ -2,9 +2,12 @@
 Ghidra has an elaborate hierarchy of object classes that model a binary program.  These
 collections of objects include addresses, data types and structures, symbols and symbol
 tables, instructions, code and data units (listings), symbolic assignments to variables
-(equates), decompiled function (high functions), and so on.
+(equates), decompiled function (high functions), and so on. The upside of this large
+collection of abstractions is that Ghidra can implement many analyses completely
+independently of the underlying CPU, starting with Sleigh and P-code and working
+with higher abstractions.
 
-The upside of this extremely rich type system is that it's often non-intuitive which
+The downside of this extremely rich type system is that it's often non-intuitive which
 arguments are needed for which Ghidra scripted action, and what they might be called.  For
 example, does Ghidra's disassembly function need an offset, an address, or a symbol as its
 disassembly starting point? What kinds of arguments should be given to the decompilation
