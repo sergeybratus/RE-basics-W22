@@ -1,0 +1,306 @@
+
+>>> fn = getGlobalFunctions("process_this_here_string")[0]
+>>> type(fn)
+<type 'ghidra.program.database.function.FunctionDB'>
+
+--------------[ Some convenient quick functions to search the Python environment ]--------------
+
+Although the Python window has helpful tab completion (type "get" and hit the tab key),
+I like having a programmatic option as well. 
+So I defined 'grep' to search an object's dictionary, and 'ggrep' to search the global
+Python environment (i.e., all the methods inherited from GhidraScript and FlatAPI):
+
+>>> grep
+Traceback (most recent call last):
+  File "python", line 1, in <module>
+NameError: name 'grep' is not defined
+
+Great, let's define it:
+
+>>> def grep(s,x) : return filter(lambda y: y.startswith(s), dir(x))
+... 
+
+>>> grep('get',fn)
+['getAllVariables', 'getAutoParameterCount', 'getBody', 'getCallFixup', 'getCalledFunctions', 'getCallingConvention', 'getCallingConventionName', 'getCallingFunctions', 'getClass', 'getComment', 'getCommentAsArray', 'getDefaultCallingConventionName', 'getEntryPoint', 'getExternalLocation', 'getFunctionThunkAddresses', 'getID', 'getKey', 'getLocalVariables', 'getName', 'getParameter', 'getParameterCount', 'getParameters', 'getParentNamespace', 'getProgram', 'getPrototypeString', 'getRepeatableComment', 'getRepeatableCommentAsArray', 'getReturn', 'getReturnType', 'getSignature', 'getSignatureSource', 'getStackFrame', 'getStackPurgeSize', 'getSymbol', 'getTags', 'getThunkedFunction', 'getVariable', 'getVariables']
+
+And for the global environment (all in a dictionary returned by globals()):
+
+>>> def ggrep(s) : return filter(lambda y: y.startswith(s), globals())
+... 
+>>>
+
+All of FlatAPI's getters:
+
+>>> ggrep("get")
+['getByte', 'getLastData', 'getPostComment', 'getGhidraVersion', 'getMemoryBlock', 'getAnalysisOptionDescriptions', 'getScriptArgs', 'getCurrentAnalysisOptionsAndValues', 'getEquate', 'getSymbols', 'getProjectRootFolder', 'getCodeUnitFormat', 'getMonitor', 'getAnalysisOptionDefaultValues', 'getFunctionBefore', 'getBytes', 'getFirstData', 'getEquates', 'getCurrentProgram', 'getPreComment', 'getFunctionAt', 'getPlateCommentAsRendered', 'getCategory', 'getAnalysisOptionDefaultValue', 'getNamespace', 'getFragment', 'getSymbol', 'getMemoryBlocks', 'getInstructionContaining', 'getDouble', 'getFloat', 'getReference', 'getSymbolBefore', 'getProgramFile', 'getPostCommentAsRendered', 'getSymbolAt', 'getDataTypes', 'getReferencesFrom', 'getRepeatableComment', 'getInstructionBefore', 'getPreCommentAsRendered', 'getEOLCommentAsRendered', 'getInt', 'getFunctionAfter', 'getDataAt', 'getDataBefore', 'getFirstInstruction', 'getRepeatableCommentAsRendered', 'getDataContaining', 'getLastInstruction', 'getLanguage', 'getAddressFactory', 'getInstructionAt', 'getFunction', 'getReferencesTo', 'getSymbolAfter', 'getPlateComment', 'getLong', 'getFirstFunction', 'getScriptAnalysisMode', 'getUndefinedDataAt', 'getDataAfter', 'getDemangled', 'getAnalysisOptionDescription', 'getUserName', 'getBookmarks', 'getLastFunction', 'getGlobalFunctions', 'getInstructionAfter', 'getDefaultLanguage', 'getUndefinedDataAfter', 'getFunctionContaining', 'getSourceFile', 'getUndefinedDataBefore', 'getEOLComment', 'getShort', 'getState', 'getScriptName']
+
+>>> ggrep('getFun')
+['getFunctionBefore', 'getFunctionAt', 'getFunctionAfter', 'getFunction', 'getFunctionContaining']
+
+--------------[ Getting a list of all functions in a program ]--------------
+
+What we actually want is 'getFunctions' for all functions in a program. It's not in the FlatAPI,
+so we'll need to search for it in the class hierarchy, starting with Program:
+
+>>> p = getCurrentProgram()
+
+>>> p
+gorf.gba - .ProgramDB
+
+>>> grep('getFun',p)
+['getFunctionManager']
+
+OK, let's get it.
+
+>>> fm = p.getFunctionManager()
+
+>>> grep('getFun',fm)
+['getFunction', 'getFunctionAt', 'getFunctionContaining', 'getFunctionCount', 'getFunctionTagManager', 'getFunctions', 'getFunctionsNoStubs', 'getFunctionsOverlapping']
+
+Seems like we have what we want, getFunctions():
+
+>>> funcs = fm.getFunctions()
+Traceback (most recent call last):
+  File "python", line 1, in <module>
+TypeError: getFunctions(): expected 1-2 args; got 0
+
+Looking it up in https://ghidra.re/ghidra_docs/api/ghidra/program/model/listing/FunctionManager.html.
+It needs a Boolean argument in its minimal form.
+
+>>> funcs = fm.getFunctions(true)
+Traceback (most recent call last):
+  File "python", line 1, in <module>
+NameError: name 'true' is not defined
+
+OK, so it's 'True' in Python, not 'true'. But I am too impatient, so there:
+
+>>> funcs = fm.getFunctions(1)
+
+>>> funcs
+ghidra.program.database.function.FunctionManagerDB$FunctionIteratorDB@4e281c7d
+
+Let's make it a list:
+
+>>> fns = list(funcs)
+
+>>> len(fns)
+323
+
+>>> fns
+[thunk_FUN_080000e0, FUN_080000e0, FUN_08000100, FUN_08000178, process_this_here_string, FUN_08000194, FUN_0800019c, FUN_080001a4, FUN_080001f8, FUN_08000210, FUN_0800023c,
+<skipped> 
+
+OK, we now have a list of all functions. We'll iterate over this.
+
+--------------[ Getting assembly instructions in a function ]--------------
+
+This collection is very helpful: https://github.com/HackOvert/GhidraSnippets
+It comes up on many searches, this time for 'Ghidra getInstructions'.
+
+>>> currentProgram.getListing().getInstructions(1)
+ghidra.program.database.code.InstructionRecordIterator@28c74c35
+
+>>> i = currentProgram.getListing().getInstructions(1)
+
+This gets me an iterator:
+
+>>> type(i)
+<type 'ghidra.program.database.code.InstructionRecordIterator'>
+
+So let's just get the list:
+
+>>> list(i)
+[b 0x080000c0, b 0x080000e0, sub r7,sp,#0x200, ldr r5,[0x80000fc], ldr r6,[0x80000f8], mov r1,#0x4000000, str r6,[r1,#-0x4], bx r5, stmdb sp!,{r4 r5 r6 r7 r8 r9 r10 r11 lr}, mov r9,#0x4000000, orr r9,r9,#0x200, ldrh r10,[r9,#0x2], mov r8,#0x3000000, orr r8,r8,#0x600, adr lr,0x8000124, <skipped>
+
+Oops, I got a long list, all instructions from this program. Too big to scroll through...
+
+>>> li = list(currentProgram.getListing().getInstructions(1))
+
+>>> len(li)
+14950
+
+(and these are only the instructions that Ghidra's disassembler picked up on the first try)
+
+That's what an Instruction object looks like:
+
+>>> type(li[0])
+<type 'ghidra.program.database.code.InstructionDB'>
+
+>>> grep("get", li[0])
+['getAddress', 'getAddressString', 'getBaseContextRegister', 'getBigInteger', 'getByte', 'getBytes', 'getBytesInCodeUnit', 'getClass', 'getComment', 'getCommentAsArray', 'getDefaultFallThrough', 'getDefaultFallThroughOffset', 'getDefaultFlows', 'getDefaultOperandRepresentation', 'getDefaultOperandRepresentationList', 'getDelaySlotDepth', 'getExternalReference', 'getFallFrom', 'getFallThrough', 'getFlowOverride', 'getFlowType', 'getFlows', 'getInputObjects', 'getInstructionContext', 'getInt', 'getIntProperty', 'getKey', 'getLabel', 'getLength', 'getLong', 'getMaxAddress', 'getMemBuffer', 'getMemory', 'getMinAddress', 'getMnemonicReferences', 'getMnemonicString', 'getNext', 'getNumOperands', 'getObjectProperty', 'getOpObjects', 'getOperandRefType', 'getOperandReferences', 'getOperandType', 'getOriginalPrototypeContext', 'getParserContext', 'getPcode', 'getPrevious', 'getPrimaryReference', 'getPrimarySymbol', 'getProcessorContext', 'getProgram', 'getPrototype', 'getReferenceIteratorTo', 'getReferencesFrom', 'getRegister', 'getRegisterValue', 'getRegisters', 'getResultObjects', 'getScalar', 'getSeparator', 'getShort', 'getStringProperty', 'getSymbols', 'getUnsignedByte', 'getUnsignedInt', 'getUnsignedShort', 'getValue', 'getVarLengthInt', 'getVarLengthUnsignedInt', 'getVoidProperty']
+
+For the naive matching I want to do, I need these instructions in plain text form.
+
+>>> "{}".format(li[0])
+'b 0x080000c0'
+
+>>> li[0].toString()
+u'b 0x080000c0'
+
+>>> li[0].toString()
+u'b 0x080000c0'
+>>> grep('Mnem',li[0])
+[]
+>>> grep('mnem',li[0])
+['mnemonicReferences', 'mnemonicString']
+>>> li[0].mnemonicString
+u'b'
+
+OK, we can get _all_ instructions from a program, but I only really want those
+from a function. For this, I can use the third form of getInstructions, with
+the AddressSet first argument. That AddressSet is returned by the Function's
+method getBody():
+
+>>> fn.getBody()
+[[08000184, 08000193] ]
+
+>>> type(fn.getBody())
+<type 'ghidra.program.model.address.AddressSet'>
+
+OK, I got my AddressSet, now to use it.
+
+First, we need to get the Program object, to get its Listing and then call its .getInstructions().
+We could do this with the flat API
+
+>>> p = getCurrentProgram()
+
+We could have also do this by asking our function for its owner Program:
+
+>>> fn.getProgram() == p
+True
+
+>>> ll = p.getListing().getInstructions(fn.getBody())
+Traceback (most recent call last):
+  File "python", line 1, in <module>
+TypeError: getInstructions(): 1st arg can't be coerced to boolean
+
+Oops, forgot I needed the second argument for the direction of disassembly
+
+>>> ll = p.getListing().getInstructions(fn.getBody(),1)
+
+>>> ll
+ghidra.program.database.code.InstructionRecordIterator@654e9e15
+
+>>> list(ll)
+[stmdb sp!,{r0}, mov r0,pc, bx lr]
+
+Now we have all the components we need for the script to automatically find
+functions of this kind. See find-here-data-functions.py
+
+--------------[ Invoking decompilation ]--------------
+
+We worked through the example in https://deadc0de.re/articles/ghidra-scripting-python.html,
+explaining what the relevant interfaces and objects are and what they do.
+
+There are two global classes that control and configure decompilation:
+
+>>> ggrep("Decomp")
+['DecompInterface', 'DecompileOptions']
+
+>>> dir(DecompInterface)
+['__class__', '__copy__', '__deepcopy__', '__delattr__', '__doc__', '__ensure_finalizer__', '__eq__', '__format__', '__getattribute__', '__hash__', '__init__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__str__', '__subclasshook__', '__unicode__', 'class', 'closeProgram', 'compilerSpec', 'dataTypeManager', 'debugEnabled', 'decompileFunction', 'dispose', 'enableDebug', 'equals', 'flushCache', 'getClass', 'getCompilerSpec', 'getDataTypeManager', 'getLanguage', 'getLastMessage', 'getOptions', 'getProgram', 'getSimplificationStyle', 'hashCode', 'language', 'lastMessage', 'notify', 'notifyAll', 'openProgram', 'options', 'program', 'resetDecompiler', 'setOptions', 'setSimplificationStyle', 'simplificationStyle', 'stopProcess', 'structureGraph', 'toString', 'toggleCCode', 'toggleJumpLoads', 'toggleParamMeasures', 'toggleSyntaxTree', 'wait']
+
+I made several mistakes when dealing with these. First, DecompInterface() is a 'factory', not
+a usable object itself:
+
+>>> DecompInterface.getOptions()
+Traceback (most recent call last):
+  File "python", line 1, in <module>
+TypeError: getOptions(): expected 1 args; got 0
+
+>>> type(DecompInterface)
+<type 'java.lang.Class'>
+
+So I actually asked for a method that is inherited from Java class internals,
+not the decompilation options I wanted.
+
+I need to get a DecompInterface object first from this factory:
+
+>>> iface = DecompInterface()
+
+>>> iface
+ghidra.app.decompiler.DecompInterface@6ed2c56c
+
+>>> opts = iface.getOptions()
+>>> opts
+
+But that's not what I wanted: I wanted to first show and then tweak default options.
+
+For this, I need the second interface that ggrep('Decomp') revealed: DecompileOptions
+
+>>> o = DecompileOptions()
+>>> o
+ghidra.app.decompiler.DecompileOptions@22b6781e
+>>> dir(o)
+['AliasBlockEnum', 'CommentStyleEnum', 'EOLCommentIncluded', 'IntegerFormatEnum', 'NamespaceStrategy', 'PLATECommentIncluded', 'POSTCommentIncluded', 'PRECommentIncluded', 'SUGGESTED_DECOMPILE_TIMEOUT_SECS', 'SUGGESTED_MAX_INSTRUCTIONS', 'SUGGESTED_MAX_PAYLOAD_BYTES', 'WARNCommentIncluded', '__class__', '__copy__', '__deepcopy__', '__delattr__', '__doc__', '__ensure_finalizer__', '__eq__', '__format__', '__getattribute__', '__hash__', '__init__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__str__', '__subclasshook__', '__unicode__', 'cacheSize', 'class', 'codeViewerBackgroundColor', 'commentColor', 'commentStyle', 'constantColor', 'conventionPrint', 'currentVariableHighlightColor', 'defaultColor', 'defaultFont', 'defaultTimeout', 'displayLanguage', 'displayLineNumbers', 'eliminateUnreachable', 'equals', 'functionColor', 'getCacheSize', 'getClass', 'getCodeViewerBackgroundColor', 'getCommentColor', 'getCommentStyle', 'getConstantColor', 'getCurrentVariableHighlightColor', 'getDefaultColor', 'getDefaultFont', 'getDefaultTimeout', 'getDisplayLanguage', 'getFunctionColor', 'getGlobalColor', 'getKeywordColor', 'getMaxInstructions', 'getMaxPayloadMBytes', 'getMaxWidth', 'getMiddleMouseHighlightButton', 'getMiddleMouseHighlightColor', 'getParameterColor', 'getProtoEvalModel', 'getSearchHighlightColor', 'getTypeColor', 'getVariableColor', 'getXML', 'globalColor', 'grabFromProgram', 'grabFromToolAndProgram', 'hashCode', 'headCommentIncluded', 'isConventionPrint', 'isDisplayLineNumbers', 'isEOLCommentIncluded', 'isEliminateUnreachable', 'isHeadCommentIncluded', 'isNoCastPrint', 'isPLATECommentIncluded', 'isPOSTCommentIncluded', 'isPRECommentIncluded', 'isSimplifyDoublePrecision', 'isWARNCommentIncluded', 'keywordColor', 'maxInstructions', 'maxPayloadMBytes', 'maxWidth', 'middleMouseHighlightButton', 'middleMouseHighlightColor', 'noCastPrint', 'notify', 'notifyAll', 'parameterColor', 'protoEvalModel', 'registerOptions', 'searchHighlightColor', 'setCommentStyle', 'setConventionPrint', 'setDefaultTimeout', 'setDisplayLanguage', 'setEOLCommentIncluded', 'setEliminateUnreachable', 'setHeadCommentIncluded', 'setMaxInstructions', 'setMaxPayloadMBytes', 'setMaxWidth', 'setNoCastPrint', 'setPLATECommentIncluded', 'setPOSTCommentIncluded', 'setPRECommentIncluded', 'setProtoEvalModel', 'setSimplifyDoublePrecision', 'setWARNCommentIncluded', 'simplifyDoublePrecision', 'toString'
+, 'typeColor', 'variableColor', 'wait']
+
+These options can be tweaked and then set on the decompiler:
+
+>>> iface.setOptions(o)
+True
+>>> iface.getOptions()
+ghidra.app.decompiler.DecompileOptions@22b6781e
+
+The decompiler needs to be pointed at the Program object, so that it can take advantage of
+the symbol tables, disassembly listing, memory info, etc.
+
+Anothing bit of fumbling:
+
+>>> iface.openProgram(fn)
+Traceback (most recent call last):
+  File "python", line 1, in <module>
+TypeError: openProgram(): 1st arg can't be coerced to ghidra.program.model.listing.Program
+
+Sure, we need the containing Program, with all of global symbol information, not just the function.
+
+>>> iface.openProgram(fn.getProgram())
+True
+
+DecompileResults is a rather complex object, because it can return asbtract syntax trees,
+annotated XML, and plain string C code. Read the top of 
+https://ghidra.re/ghidra_docs/api/ghidra/app/decompiler/DecompileResults.html
+for the use directions.
+
+Decompilation takes a long time, so it takes a timeout parameter and a reference to the
+GUI progress monitor.
+
+>>> res = iface.decompileFunction(fn, 10, monitor)
+
+>>> res
+ghidra.app.decompiler.DecompileResults@45ba3884
+
+>>> dir(res)
+['CCodeMarkup', '__class__', '__copy__', '__deepcopy__', '__delattr__', '__doc__', '__ensure_finalizer__', '__eq__', '__format__', '__getattribute__', '__hash__', '__init__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__str__', '__subclasshook__', '__unicode__', 'cancelled', 'class', 'decompileCompleted', 'decompiledFunction', 'equals', 'errorMessage', 'failedToStart', 'function', 'getCCodeMarkup', 'getClass', 'getDecompiledFunction', 'getErrorMessage', 'getFunction', 'getHighFunction', 'getHighParamID', 'hashCode', 'highFunction', 'highParamID', 'isCancelled', 'isTimedOut', 'notify', 'notifyAll', 'timedOut', 'toString', 'wait']
+
+>>> res.getErrorMessage()
+u''
+
+HighFunction is the richest object, representing all of inferred info and analysis results.
+
+>>> hfn = res.getHighFunction()
+
+>>> dir(hfn)
+['DECOMPILER_TAG_MAP', 'ID', '__class__', '__copy__', '__deepcopy__', '__delattr__', '__doc__', '__ensure_finalizer__', '__eq__', '__format__', '__getattribute__', '__hash__', '__init__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__str__', '__subclasshook__', '__unicode__', 'addressFactory', 'basicBlocks', 'buildFunctionXML', 'buildStorage', 'class', 'clear', 'clearNamespace', 'collapseToGlobal', 'compilerSpec', 'createFromStorage', 'createLabelSymbol', 'createNamespaceTag', 'dataTypeManager', 'delete', 'deleteSymbol', 'equals', 'findCreateNamespace', 'findCreateOverrideSpace', 'findInputVarnode', 'findNamespace', 'findOverrideSpace', 'findVarnode', 'function', 'functionPrototype', 'getAddressFactory', 'getBasicBlocks', 'getClass', 'getCompilerSpec', 'getDataTypeManager', 'getErrorHandler', 'getFunction', 'getFunctionPrototype', 'getGlobalSymbolMap', 'getID', 'getJumpTables', 'getLanguage', 'getLocalSymbolMap', 'getMappedSymbol', 'getNumVarnodes', 'getOpRef', 'getPcodeOp', 'getPcodeOps', 'getRef', 'getSymbol', 'getVarnodes', 'getVbank', 'globalSymbolMap', 'grabFromFunction', 'hashCode', 'insertAfter', 'insertBefore', 'jumpTables', 'language', 'locRange', 'localSymbolMap', 'newOp', 'newVarnode', 'notify', 'notifyAll', 'numVarnodes', 'pcodeOps', 'readXML', 'readXMLVarnodePieces', 'setAddrTied', 'setDataType', 'setInput', 'setMergeGroup', 'setOpcode', 'setOutput', 'setPersistent', 'setUnaffected', 'splitOutMergeGroup', 'stringTree', 'tagFindExclude', 'toString', 'unInsert', 'unSetInput', 'unSetOutput', 'unlink', 'vbank', 'wait']
+
+The C code as a string lives in the DecompiledFunction, which is really simple, just the code
+and the function signature.
+
+>>> dfn = res.getDecompiledFunction()
+
+>>> type(dfn)
+<type 'ghidra.app.decompiler.DecompiledFunction'>
+
+>>> dir(dfn)
+['__class__', '__copy__', '__deepcopy__', '__delattr__', '__doc__', '__ensure_finalizer__', '__eq__', '__format__', '__getattribute__', '__hash__', '__init__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__str__', '__subclasshook__', '__unicode__', 'c', 'class', 'equals', 'getC', 'getClass', 'getSignature', 'hashCode', 'notify', 'notifyAll', 'signature', 'toString', 'wait']
+
+>>> dfn.getC()
+u'\nint process_this_here_string(void)\n\n{\n  int in_lr;\n  \n  return in_lr + 4;\n}\n\n'
+
+>>> dfn.getSignature()
+u'int process_this_here_string(void);'
+
+Note how different the Listing's disassembled Function is from the decompiled HighFunction:
+
+>>> dir(fn)
+['DEFAULT_CALLING_CONVENTION_STRING', 'DEFAULT_LOCAL_PREFIX', 'DEFAULT_LOCAL_PREFIX_LEN', 'DEFAULT_LOCAL_RESERVED_PREFIX', 'DEFAULT_LOCAL_TEMP_PREFIX', 'DEFAULT_PARAM_PREFIX', 'DEFAULT_PARAM_PREFIX_LEN', 'DELIMITER', 'FunctionUpdateType', 'GLOBAL_NAMESPACE_ID', 'ID', 'INLINE', 'INVALID_STACK_DEPTH_CHANGE', 'NAMESPACE_DELIMITER', 'NORETURN', 'RETURN_PTR_PARAM_NAME', 'THIS_PARAM_NAME', 'THUNK', 'UNKNOWN_CALLING_CONVENTION_STRING', 'UNKNOWN_STACK_DEPTH_CHANGE', '__class__', '__copy__', '__deepcopy__', '__delattr__', '__doc__', '__ensure_finalizer__', '__eq__', '__format__', '__getattribute__', '__hash__', '__init__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__str__', '__subclasshook__', '__unicode__', 'addLocalVariable', 'addParameter', 'addTag', 'allVariables', 'autoParameterCount', 'body', 'callFixup', 'callingConvention', 'callingConventionName', 'class', 'comment', 'commentAsArray', 'customVariableStorage', 'defaultCallingConventionName', 'deleted', 'doDeleteVariable', 'entryPoint', 'equals', 'external', 'externalLocation', 'functionThunkAddresses', 'getAllVariables', 'getAutoParameterCount', 'getBody', 'getCallFixup', 'getCalledFunctions', 'getCallingConvention', 'getCallingConventionName', 'getCallingFunctions', 'getClass', 'getComment', 'getCommentAsArray', 'getDefaultCallingConventionName', 'getEntryPoint', 'getExternalLocation', 'getFunctionThunkAddresses', 'getID', 'getKey', 'getLocalVariables', 'getName', 'getParameter', 'getParameterCount', 'getParameters', 'getParentNamespace', 'getProgram', 'getPrototypeString', 'getRepeatableComment', 'getRepeatableCommentAsArray', 'getReturn', 'getReturnType', 'getSignature', 'getSignatureSource', 'getStackFrame', 'getStackPurgeSize', 'getSymbol', 'getTags', 'getThunkedFunction', 'getVariable', 'getVariables', 'global', 'hasCustomVariableStorage', 'hasNoReturn', 'hasVarArgs', 'hashCode', 'inline', 'insertParameter', 'isDeleted', 'isExternal', 'isGlobal', 'isInline', 'isStackPurgeSizeValid', 'isThunk', 'key', 'localVariables', 'moveParameter', 'name', 'noReturn', 'notify', 'notifyAll', 'parameterCount', 'parameters', 'parentNamespace', 'program', 'promoteLocalUserLabelsToGlobal', 'removeParameter', 'removeTag', 'removeVariable', 'repeatableComment', 'repeatableCommentAsArray', 'replaceParameters', 'return', 'returnType', 'setBody', 'setCallFixup', 'setCallingConvention', 'setComment', 'setCustomVariableStorage', 'setInline', 'setInvalid', 'setName', 'setNoReturn', 'setParentNamespace', 'setRepeatableComment', 'setReturn', 'setReturnType', 'setSignatureSource', 'setStackPurgeSize', 'setThunkedFunction', 'setValidationEnabled', 'setVarArgs', 'signature', 'signatureSource', 'stackFrame', 'stackPurgeSize', 'stackPurgeSizeValid', 'symbol', 'tags', 'thunk', 'thunkedFunction', 'toString', 'updateFunction', 'validationEnabled', 'varArgs', 'wait']
