@@ -80,3 +80,8 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 <hr>
 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Ghidra-scripts-and-class-hierarchy-notes.txt">GhidraScript and class hierarchy notes</a>
+
+<hr>
+
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/instructions-matching-log.txt">Notes from the X-hour</a> on matching native instruction by scripting and the <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/find-here-data-functions.py">ad hoc plugin</a> to do it.
+
