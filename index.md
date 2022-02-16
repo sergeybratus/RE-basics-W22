@@ -85,3 +85,9 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 
 <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/instructions-matching-log.txt">Notes from the X-hour</a> on matching native instruction by scripting and the <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/find-here-data-functions.py">ad hoc plugin</a> to do it.
 
+<hr>
+
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/RiverLoopSecurity-FirmwareCarving-202202.pdf">Firmware Carving</a> slides from the River Loop Security invited talk.
+
+<hr>
+
