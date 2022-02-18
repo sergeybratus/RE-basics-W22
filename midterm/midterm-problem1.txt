@@ -1,0 +1,91 @@
+
+====================[ Midterm Problem 1 ]====================
+
+For this problem you will get an archive with an x86_64 executable
+program for Linux or MacOS (see below for info about 32-bit systems).
+You objective is to learn enough about it---by disassembling it, 
+running it under the debugger, and/or tracing it (using such tools
+as Linux's strace and MacOS' dtruss) or whatever other tools---so
+that you will have it print your token.
+
+When executed, this program will interact with your OS by making some
+system calls. If the code likes what it sees, it will attempt to execute
+some more code. You need to understand what the program is looking
+for, and manipulate you system so that the program does like what it
+sees (Hint: you can create this condition with one Unix shell
+command.)
+
+This new code, if it succeeds, will print your token---but it will
+likely NOT succeed the first time (in fact, its chance of random
+success is about 1 in 60). For this code to succeed, you will need
+to manipulate your system some more (again, a single Unix command
+would suffice).
+
+If the code succeeds, it will print your token and an intelligible
+message. If it fails, it may:
+ - print another message (without a token), 
+ - print some gibberish,
+ - and/or crash.
+Your goal is to get it to succeed every time the program is run.
+
+NOTE: This code uses tricks that aren't meant to be used by regular,
+      well-engineered programs. Thus, don't be surprised by program
+      crashes; don't run these programs as "root", and the crashes
+      will not harm your system. 
+
+(*) I know some of you may run 32-bit Linux; since the exercise depends on
+some properties of 64-bit code, I will ask you to use CS machines to
+solve this exercises. If, however, working from your CS account is
+hard for you, I will provide a custom 32-bit version by request. 
+
+1. Where to get your archive file.
+
+Take the last 4 digits of your student ID, convert them to all lowercase.
+Then look for a directory containing this 4-byte word in the midterm/p1 folder in
+the course Github repo, and download the .zip archive(s) you find there.
+For example, is your ID is F000XYZ, then look in the directory
+midterm/p1/0xyz/ .
+
+If you are auditing this course, I don't know your ID. Use the literal "0xyz" archive(s).
+
+Pick the right archive for your system, "linux" for 64-bit Linux, "darwin" for x86_64
+MacOS X.
+
+There are several version of the challenge file, so you can pick the
+theme of your program's messages.
+
+If you a fan of J.R.R. Tolkien's 'The Hobbit', pick the one with 'hobbit'.
+If you like H.P. Lovecraft's stories, pick the one with 'lovecraft'.
+If you don't care for either, pick the 'plain' version. I am not doing
+the 'Game of Thrones' version.
+
+Regardless of the theme, the essence of the exercise remains the same.
+
+2. Once you extract the token, submit it in an email to me and the
+TAs, alongside a brief writeup describing your analysis and findings.
+Also, submit the shell commands that you used to manipulate your OS
+environment to make the unmodified program print its token.
+
+3. You may discover your token by luck, by changing the program,
+and/or by manipulating its state while running it under the debugger.
+
+Your solution will be complete when you get the program to print the
+token without changing the file or the running program's state (say,
+with a debugger).
+
+4. If you get stuck, email us with questions, or post them on the
+Slack forum. The first hint is always free :) Also, keep in mind that
+if you help me find a bug in my programs that might also affect other
+students, I will give you extra credit.
+
+----------------------------[ Policy Note: ]----------------------------
+The only rule is that you DO NOT post step-by-step walk-throughs of
+the actual solution. You are, however, encouraged to discuss the tools
+and techniques, and exchange the tips and tricks of using the tools.
+Extra credit may be given for extra-helpful advice shared :)
+
+Think of this as a "NO SPOILERS" policy you would use on a book/movie
+you happen to like and want to hook others on. If really in doubt, ask :)
+------------------------------------------------------------------------
+
+Good luck!
