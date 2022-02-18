@@ -1,0 +1,50 @@
+
+====================[ Midterm Problem 2 ]====================
+
+The GBA image we've been using for our Ghidra exercises contains a number of functions
+that return a fixed address in GBA's WRAM where a global variable is stored.
+
+For example, this is the case with the function we called get_life_address (0x843e160),
+which returns the address of the global 'remaining lives/ships' variable (0x20020c4):
+
+                             **************************************************************
+                             *                                                            *
+                             *  FUNCTION                                                  *
+                             **************************************************************
+                             undefined get_life_address()
+             undefined         r0:1           <RETURN>
+                             get_life_address                                XREF[17]:    08442954(c), 0844296c(c),
+                                                                                          084429a0(c), 08442a3c(c),
+                                                                                          08442a60(c), 08442aec(c),
+                                                                                          FUN_0844bac4:0844bbe0(c),
+                                                                                          0844c3dc(c), 0844c410(c),
+                                                                                          0844c454(c), 0844c4b8(c),
+                                                                                          08459010(c), 0846b4d8(c),
+                                                                                          0846b5bc(c), 0846b6a0(c),
+                                                                                          0846b784(c), 0846b868(c)
+        0843e160 01 00 2d e9     stmdb      sp!,{r0}
+        0843e164 04 50 8f e2     adr        r5,0x843e170
+        0843e168 00 00 15 e4     ldr        r0=>DAT_020020c4,[r5],#0x0=>PTR_DAT_0843e170     = 020020c4
+        0843e16c 1e ff 2f e1     bx         lr
+                             PTR_DAT_0843e170                                XREF[1]:     get_life_address:0843e168(R)
+        0843e170 c4 20 00 02     addr       DAT_020020c4
+
+
+1. Write a Ghidra script that finds and renames all(*) such functions.
+
+2. Using the results of (1), identify the meaning of at least 3 more
+   global variables.
+
+3. Submit your script and a succint writeup documenting your method
+   and the results to me and the TAs.
+
+(*) Remember that the initial disassembly of a file may not cover some
+    relevant code right away, due to stopping at an embedded data
+    islands, and that further disassembly may become possible after
+    some data is annotated. Strive for full coverage.
+
+
+You are welcome to borrow any code findable online, e.g., examples
+from https://github.com/HackOvert/GhidraSnippets, examples from class,
+etc. Please identify the sources in your writeup. Feel free to
+recommend them to other students in the class, too.
