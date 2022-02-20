@@ -1,0 +1,193 @@
+# Docker container to run a basic binwalk in.
+# Not size minimized, should be updated for incremental builds.
+
+FROM ubuntu:20.04 AS base
+
+WORKDIR /opt
+
+ENV TZ=America/New_York
+ENV LD_LIBRARY_PATH=/usr/local/lib
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+RUN apt-get update && apt-get install -y \
+        build-essential \
+        curl \
+        git \
+        python \
+        python3 \
+        python3-pip \
+        python-dev \
+        python-numpy \
+        #python-pip \
+        #python-lzma \
+        python3-future \
+        python-magic \
+        python3-magic \
+        python-usb \
+        python-crypto \
+        #python-serial \ 
+        python-setuptools \
+        libgcrypt-dev \
+        device-tree-compiler \
+        software-properties-common \
+        squashfs-tools \
+        wget \
+        vim \
+        unzip \
+        p7zip-full \
+        zip \
+        nmap \
+        subversion \
+        bsdmainutils \
+        openssl \
+        yasm \
+        libssl-dev \
+        libperl-dev \
+        libz-dev \
+        liblzma-dev \
+        liblzo2-dev \
+        texinfo \
+        libgmp-dev \
+        libpcap-dev \
+        pkg-config \
+        libbz2-dev \
+        zlib1g-dev \
+        mtd-utils \
+        gzip \
+        bzip2 \
+        tar \
+        arj \
+        lhasa \
+        cabextract \
+        cramfsswap \
+        sleuthkit \
+        default-jdk \
+        lzop \
+        srecord \
+        opencl-headers \
+        virtualenv \
+        xvfb \
+        qemu \
+        qemu-user-static \
+        qemu-user \
+        libc6-armel-cross \
+        libxml2-dev \
+        libxslt1-dev \
+        libffi-dev \
+        libarchive-zip-perl \
+        libc6-dev-i386 \
+        gcc-multilib \
+        g++-multilib \
+        libtool \
+        m4 \
+        automake \
+        u-boot-tools \
+        && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip install --upgrade pip
+RUN pip3 install --upgrade pip
+
+RUN pip install \
+    rangeparser \
+    cstruct \
+    matplotlib \
+    capstone \
+    pycrypto \
+    nose \
+    coverage \
+    pytest \
+    python-lzo
+
+RUN pip3 install \
+    matplotlib
+
+FROM base AS packagebuilder
+
+ENV UID 0
+ENV PATH_CHROOT /chroot
+ENV PATH_LIBS_ARM /usr/arm-linux-gnueabi/lib
+
+RUN mkdir /opt/bins
+
+RUN git clone https://github.com/jclehner/bcm2-utils.git && \
+    cd bcm2-utils && \
+    make release-linux && \
+    cp bcm2dump bcm2cfg psextract /opt/bins/ && \
+    cd /opt
+
+# Build is broken, needs resolution:
+#RUN wget https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/firmware-mod-kit/fmk_099.tar.gz && \
+#    tar -zxf fmk_099.tar.gz && \ 
+#    cd fmk/src && \
+#    ./configure && make && \
+#    cd /opt/fmk/fmk && \
+#    mv *.sh /opt/bins/ && \
+#    cd /opt
+
+# Website link out of date, now 404s:
+#RUN wget http://my.smithmicro.com/downloads/files/stuffit520.611linux-i386.tar.gz && \
+#    tar -zxf stuffit520.611linux-i386.tar.gz && \
+#    cp bin/unstuff /opt/bins/
+
+RUN git clone https://github.com/Broadcom/aeolus.git && \
+    cd aeolus/ProgramStore && \
+    make && \
+    cp ProgramStore /opt/bins/ && \
+    cd /opt
+
+FROM base AS pybuilder
+
+COPY --from=packagebuilder /opt/bins/* /usr/local/bin/
+
+WORKDIR /opt
+
+RUN git clone https://github.com/ReFirmLabs/binwalk.git && \
+    cd binwalk && \
+    python setup.py install && \
+    cd /opt
+
+RUN git clone https://github.com/jrspruitt/ubi_reader.git && \
+    cd ubi_reader && \
+    python setup.py install && \
+    cd /opt
+
+RUN git clone https://github.com/sviehb/jefferson.git && \
+    cd jefferson && \
+    python setup.py install && \
+    cd /opt
+
+RUN git clone https://github.com/devttys0/sasquatch && \
+    cd sasquatch && \
+    ./build.sh && \
+    cd /opt
+
+RUN git clone https://github.com/theopolis/uefi-firmware-parser.git && \
+    cd uefi-firmware-parser && \
+    python setup.py install && \
+    cd /opt
+
+RUN git clone https://git.tukaani.org/lzma.git && \
+    cd lzma && \
+    ./autogen.sh && \
+    ./configure && \
+    make && \
+    make install && \
+    cd /opt
+
+RUN wget https://infraroot.at/pub/squashfs/squashfs-tools-ng-0.8.tar.gz && \
+    tar -xzf squashfs-tools-ng-0.8.tar.gz && \
+    cd squashfs-tools-ng-0.8 && \
+    ./configure && \
+    make && \
+    make install && \
+    cd /opt
+
+RUN git clone https://github.com/Dr-Emann/PySquashfsImage.git && \
+    cd PySquashfsImage && \
+    python setup.py install && \
+    cd /opt
+
+CMD ["/bin/bash"]
+
