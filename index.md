@@ -94,3 +94,8 @@ X-hour on C++ disassembly in Ghidra: <a href="https://github.com/sergeybratus/RE
 Invited talk <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/GHIDRA-For-Dartmouth.pdf">Program Analysis With Ghidra</a> by Alexei Bulazel, with Ghidra script <a href="https://github.com/0xAlexei/Publications/tree/master/Ghidra">code</a>. 
 
 <hr>
+
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/REing_the_cloud.pdf">Slides</a> from invited X-hour talk by Jacob Torrey.
+
+<hr>
+
