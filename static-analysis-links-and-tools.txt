@@ -1,0 +1,84 @@
+
+The following links illustrate static analysis examples from Sophia D'Antoine's invited talk.
+
+=========================[ Format string vulnerabilities ]=============================
+
+Libc's printf() function provides a lot of power to attackers who can control
+its first argument, the format string. Therefore a data flow from any attacker-controlled
+input to printf's first argument is potentially a serious vulnerability.
+
+Famous 2002 Phrack article on format string exploitation: http://phrack.org/issues/59/7.html,
+by gera and riq of Core Security 
+
+Printf() is actually Turing-complete:
+
+"""
+we show that a single call to printf() allows an attacker to perform Turing-complete
+computation, even when protected with a shadow stack. We dub this printf-oriented
+programming. In our evaluation, we found it was possible to mount this kind of attack
+against all but one binary (which rewrote their own limited version of printf)
+"""
+
+Control-Flow Bending: On the Effectiveness of Control-Flow Integrity, Nicholas Carlini et al.
+https://www.usenix.org/system/files/conference/usenixsecurity15/sec15-paper-carlini.pdf
+
+Note that in all of these examples, the attackers need not introduce any malicious
+code of their own. Instead, printf's own code does does the actual work of exploitation,
+serving as a sort of a virtual machine engine for the attacker.
+
+=============================[ Heap exploitation ]=============================
+
+There are many methods of heap explotation that rely on corrupting some data on the heap
+and then having the Libc's own heap management code (or custom application heap manager's
+code ) do the rest---just like printf's own code is manipulated into executing the
+exploit in the examples above.
+
+Famous original 2001 Phrack papers on Libc malloc() exploitation:
+http://phrack.org/issues/57/8.html -- "Vudo malloc tricks", by Michel "MaXX" Kaempf
+http://phrack.org/issues/57/9.html -- "Once upon a free(), anonymous
+
+The above papers relied on corrupting heap's in-band metadata, a.k.a. boundary tags.
+However, that was not the only way and libc isn't the only target:
+
+http://www.phrack.org/issues/68/10.html -- "Pseudomonarchia jemallocum" by argp & huku, 2012
+http://www.phrack.org/issues/68/10.html -- "Exploiting VLC", by the same authors 
+http://www.phrack.org/issues/69/14.html -- "OR’LYEH? The Shadow over Firefox" by argp, 2016
+More info can be found here: https://argp.github.io/research/
+
+============================[ Pointer analysis ]============================
+
+"Pointer Analysis: Haven’t We Solved This Problem Yet?" by Michael Hind,, 2001:
+https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.91.9469&rep=rep1&type=pdf
+
+Bjarne Steensgaard
+
+============================[ Model checking in Windows drivers ]===========
+
+Microsoft used a simple but effective and developer-accessible model checking
+approach for eliminating BSODs from Windows kernel drivers:
+
+"A Decade of Software Model Checking with SLAM" by Thomas Ball et al., 2011: 
+https://cacm.acm.org/magazines/2011/7/109893-a-decade-of-software-model-checking-with-slam/fulltext
+(get the PDF and read it!)
+
+============================[ Program analysis and cryptocurrencies ]=======
+
+Program analysis and vulnerability analysis used to be at least a couple of steps
+removed from the users' money. With cryptocurrencies, this is no longer the case,
+as bugs and exploits in smart contract compilers and virtual machines immediately
+translate to losses. The following talk gives a taste of the topic:
+
+"Anatomy of an Unsafe Smart Contract Programming Language" by Evan Sultanik
+https://www.youtube.com/watch?v=JaUIxMJAOsA
+
+============================[ Program analysis on production code ]================
+
+The Infer open source tool at Facebook:
+http://www.pl-enthusiast.net/2015/09/15/facebooks-peter-ohearn-on-programming-languages/
+
+An introduction to separation logic: 
+https://cacm.acm.org/magazines/2019/2/234356-separation-logic/fulltext?mobile=false
+(get the PDF and read it)
+
+---- To be continued ----
+
