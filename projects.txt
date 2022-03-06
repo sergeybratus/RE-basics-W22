@@ -1,0 +1,51 @@
+
+Final projects will be due on March 20 at the latest. I need to receive a complete
+report for your project by that date, because all grades are due to the Registrar
+on the noon of March 21 (at the latest). 
+
+Please submit a description of your project, including the subject matter, the team,
+and the final deliverable. Keep your description to one page or less: succinctness is
+fine. Email this to me and the TAs.
+
+Groups projects are encouraged, but the distribution of work between group mates
+should be fair, and the result should be commensurate with the group size. For those
+of you who prefer to work alone, individual projects are fine, too.
+
+Acceptable and encouraged projects vary a lot. Here are some suggestions:
+
+1. Understand and modify firmware binaries such as free game ROMs
+   (e.g., from https://emulationking.com/). Submit a writeup explaining
+   the layout and internal workings of the binary, and your change.
+   Include any automation scripts that you used (Ghidra, Binary Ninja, angr, etc.),
+   commented for easier understanding.
+
+2. Write a Ghidra or Binary Ninja automation script for finding interesting control or
+   data flows. Look to Alexei Bulazel's invited talk for one example (note that although
+   his analysis was not complete, it was still very useful). 
+
+3. Understand a data format, type, or structure. Look to River Loop Security
+   invited talk on understanding a packed file system format. The challenge file
+   system they created would make a great project. Submit a writeup explaining
+   the layout and internal workings of the binary, and your change.
+   Include any automation scripts that you used (Ghidra, Binary Ninja, angr, etc.),
+   commented for easier understanding.
+
+4. Write a Ghidra plugin that simplifies some steps in GUI analysis of a target,
+   such as search for patterns or binary code navigation. Start with one of
+   Ghidra's own plugins and customize it (a GUI plugin involves a lot of
+   template/boilerplate code, so save your time).
+
+5. Select a paper on decompilation, type inference from binaries, symbolic execution,
+   or other program analysis topic that has an implementation you can explore.
+   Explore this implementation on a target of your choice and submit a report
+   about the algorithm's performance and observed limitations.
+
+   When selecting a paper, I recommend looking for a statement from the conference
+   of journal that the paper's artifacts (e.g., source code of the implementation)
+   have been verified. This may save you time on trying to make an incomplete or
+   flawed implementation work.
+
+6. Any other reversing or program analysis activity involving algorithms and automation.
+
+
+
