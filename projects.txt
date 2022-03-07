@@ -45,7 +45,10 @@ Acceptable and encouraged projects vary a lot. Here are some suggestions:
    have been verified. This may save you time on trying to make an incomplete or
    flawed implementation work.
 
-6. Any other reversing or program analysis activity involving algorithms and automation.
+6. Create an interesting crackme challenge, demonstrating a feature of your chosen
+   platform, operating system, or instruction set architecture. Share with others!
+
+7. Any other reversing or program analysis activity involving algorithms and automation.
 
 
 
