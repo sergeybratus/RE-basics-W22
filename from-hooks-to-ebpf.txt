@@ -1,0 +1,95 @@
+
+-------------------[ The underappreciated importance of hooks ]-------------------
+
+Today we took a look at the development of the idea of hooking---reliable introduction
+of external code to change the behavior of a binary---from early rootkits to massive
+high-value infrastructure features of production systems such as Netfilter and eBPF.
+
+Hooks look simple---after all, they are simply locations in the code where a jump to new
+code can be inserted, and could be jumped back to when the new code has done its job---but
+they are far more sophisticated than that. What makes a hook good is that the state of the
+system, including data structures, control flows, and synchronization, is known and
+understandable at the hook point.  A good hook comes with a well-defined idea of what
+system memory and data can be interacted with safely at that point, and what cannot. This
+is what makes a hook a reliable point of composing new code with the running system,
+dynamically.
+
+Achieving these properties requires a lot of informal program analysis both in the source
+and in the binary. Security researchers did a lot of such informal analysis when building
+both offensive and defensive rootkits, and the first personal firewalls for OSes (such as
+BlackIce for Windows). Asserting these properties as a part of OS design and implementation
+required even more work. Proving them is an open research challenge for state-of-the-art 
+program analysis and verification. 
+
+-------------------[ The new composition pattern ]-------------------
+
+The new pattern of composing new code with a complex system (such as the Linux kernel)
+without corrupting its state or crashing it has emerged: a combination of hooks and a
+virtual machine (VM) that verifies and executes compiled bytecode at these hooks.
+The bytecode is limited and simpler to verify than the general-purpose ISAs; the language
+it is compiled from is limited to focus the programmer only on what matters about
+the data to be examined and the action to be taken.
+
+As Brendan Gregg explains in his talk linked below, this new composition pattern
+allowed Netflix and Facebook to modify the behavior of the Linux kernel across
+their production servers, with the effort of regular programmers (rather than
+super-specialized C kernel programmers, who are scarce and a lot more expensive).
+
+This new pattern was started with the classic BPF and Netfilter, got improved
+with DTrace (and SystemTap on Linux), and now powers the eBPF revolution in Linux
+(see below).
+
+-------------------[ Historical rootkits and their hooks ]-------------------
+
+An overview of historical rootkits is here:
+ https://www.cs.dartmouth.edu/~sergey/cs258/rootkits/00_README_FIRST.html
+(sadly, many external links from that page no longer work, but Phrack is still
+here, and local copies of code and slides in https://www.cs.dartmouth.edu/~sergey/cs258/rootkits/
+capture the most important bits).
+
+In particular, http://phrack.org/issues/59/5.html is a timeless classic for anyone
+trying to understand Linux kernel interfaces.
+
+Please note that the code examples would not work against modern Linux kernels for various
+trivial reasons, e.g., sys_call_table[] not being exported as a public symbol. However,
+the hooking principles are still the same: the rookits use system's own modular conventions
+and interfaces to achieve reliability and safety. 
+
+-------------------[ Netfilter hooks in Linux's TCP/IP stack ]-------------------
+
+https://www.netfilter.org/documentation/HOWTO/netfilter-hacking-HOWTO-3.html
+
+Joanna Rutkowska's talk about using Netfilter to implement reliable covert channels
+in Linux serves as a great intro to Netfilter hooks and a TCP/IP packet's path through
+the Linux kernel.
+Local copy: https://www.cs.dartmouth.edu/~sergey/cs258/rootkits/joanna-passive_covert_channels-CCC04.ppt
+
+-------------------[ eBPF as a new kind of software ]-------------------
+
+I highly recommend this talk by Brendan Gregg:
+  https://www.brendangregg.com/blog/2019-12-02/bpf-a-new-type-of-software.html
+
+The BPF tracing tool to hook and trace the open() system call, which we saw in class:
+  https://www.brendangregg.com/blog/2019-01-01/learn-ebpf-tracing.html
+
+A succinct modern summary of old and new BPF: https://suchakra.wordpress.com/2015/05/18/bpf-internals-i/ (part I),
+https://www.iovisor.org/blog/2015/10/15/bpf-internals-ii (part II).
+The classic BPF paper: http://www.tcpdump.org/papers/bpf-usenix93.pdf
+
+For more info, see Brendan's talk about BPF internals: https://www.youtube.com/watch?v=_5Z2AU7QTH4
+(you may skip the details of parsing the BPF language: you will learn these tools in the Compilers course).
+Also: https://lwn.net/Articles/740157/, and for a deeper dive
+  https://qmonnet.github.io/whirl-offload/2016/09/01/dive-into-bpf/
+
+BPF in Cloudflare's infrastructure:
+  https://blog.cloudflare.com/bpf-the-forgotten-bytecode/
+
+You can see that BPF is being used in production at Cloudflare, and also that the toolchain
+is still not fully streamlined---but apparently valuable and stable enough.  
+
+-------------------[ BPF is hackable, too ]-------------------
+
+https://www.graplsecurity.com/post/kernel-pwning-with-ebpf-a-love-story
+
+This one is of this writing:
+https://www.graplsecurity.com/post/iou-ring-exploiting-the-linux-kernel
