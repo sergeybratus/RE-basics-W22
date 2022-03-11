@@ -99,3 +99,8 @@ Invited talk <a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/GH
 
 <hr>
 
+<a href="https://github.com/sergeybratus/RE-basics-W22/tree/main/Sophia-DAntoine-inivted-talk-03032022.pdf">Slides</a> from invited talk by Sophia D'Antoine. 
+
+<hr>
+
+
